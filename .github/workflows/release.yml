@@ -1,0 +1,98 @@
+name: Release SCORM package
+
+# When a release is published (or a tag pushed), build the SCORM 1.2 package
+# from source/data.xml by running a real XOT instance, and attach the zip to
+# the release. The zip is never committed to the repo.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:     # allow manual runs for testing
+
+permissions:
+  contents: write        # to upload the asset to the release
+
+jobs:
+  build-scorm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo (course source)
+        uses: actions/checkout@v4
+
+      - name: Checkout XOT (docker-container branch) for the Dockerfile
+        uses: actions/checkout@v4
+        with:
+          repository: RichardoC/xerteonlinetoolkits
+          ref: docker-container
+          path: xote
+
+      - name: Build the xerte image
+        working-directory: xote
+        run: docker build -t xerte .
+
+      - name: Run XOT
+        run: |
+          docker volume create xerte-data xerte-files
+          docker run -d --name xerte -p 8081:80 \
+            -v xerte-data:/var/lib/mysql \
+            -v xerte-files:/var/www/xerte/USER-FILES \
+            -e XERTE_FRESHCLAM_ON_START=false \
+            xerte
+          # wait for provisioning (up to ~120s)
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ || echo 000)
+            if [ "$code" = "200" ]; then echo "XOT up (HTTP $code)"; break; fi
+            echo "waiting... ($code)"; sleep 2
+          done
+          curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:8081/
+
+      - name: Create project and import course content
+        run: |
+          set -e
+          COOKIE=/tmp/x.cookies
+          curl -s -c "$COOKIE" http://localhost:8081/index.php -o /dev/null
+          RESP=$(curl -s -b "$COOKIE" -c "$COOKIE" -X POST \
+            -d "templatename=Nottingham&tutorialname=Secure code development" \
+            http://localhost:8081/website_code/php/templates/new_template.php)
+          echo "Create response: $RESP"
+          ID=$(echo "$RESP" | cut -d, -f1)
+          echo "template_id=$ID" >> "$GITHUB_ENV"
+          FOLDER="/var/www/xerte/USER-FILES/${ID}-guest2-Nottingham"
+          docker cp source/data.xml    "xerte:${FOLDER}/data.xml"
+          docker cp source/preview.xml "xerte:${FOLDER}/preview.xml"
+          docker exec xerte sh -c "chown www-data:www-data '${FOLDER}/data.xml' '${FOLDER}/preview.xml'; chmod 664 '${FOLDER}/data.xml' '${FOLDER}/preview.xml'; rm -f '${FOLDER}/lockfile.txt'"
+          docker exec xerte sh -c "mariadb --socket=/run/mysqld/mysqld.sock -uroot -proot xerte -e \"UPDATE templatedetails SET access_to_whom='Public' WHERE template_id=${ID};\""
+          curl -s -o /dev/null -w "play=%{http_code}\n" "http://localhost:8081/play.php?template_id=${ID}"
+
+      - name: Export SCORM 1.2
+        run: |
+          set -e
+          COOKIE=/tmp/x.cookies
+          curl -s -c "$COOKIE" http://localhost:8081/index.php -o /dev/null
+          mkdir -p out
+          curl -sL -b "$COOKIE" -o out/Secure_code_development_scorm.zip \
+            -w "export HTTP=%{http_code}, size=%{size_download} bytes\n" \
+            "http://localhost:8081/website_code/php/scorm/export.php?scorm=true&template_id=${{ env.template_id }}"
+          ls -la out/
+
+      - name: Verify the package
+        run: |
+          unzip -l out/Secure_code_development_scorm.zip | head
+          unzip -p out/Secure_code_development_scorm.zip imsmanifest.xml | grep -oE 'schemaversion>[^<]*|scormtype="[a-z]*"'
+          unzip -p out/Secure_code_development_scorm.zip template.xml > /tmp/check.xml
+          echo "questions: $(grep -oE '<question' /tmp/check.xml | wc -l | tr -d ' ')"
+          echo "pass mark: $(grep -oE 'trackingPassed="[^"]*"' /tmp/check.xml)"
+          echo "empty options: $(python3 -c "import re,html; x=open('/tmp/check.xml').read(); print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if html.unescape(html.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))")"
+
+      - name: Upload artifact (for workflow_dispatch / fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorm-package
+          path: out/Secure_code_development_scorm.zip
+          retention-days: 30
+
+      - name: Attach zip to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/Secure_code_development_scorm.zip

@@ -1,0 +1,93 @@
+name: PR preview
+
+# On every pull request, render the course content (source/data.xml) into a
+# readable, self-contained HTML page and upload it as a build artifact, then
+# comment on the PR with a link and a quick summary. Reviewers can download the
+# artifact and open index.html in a browser to read the new content version
+# (including quizzes, with correct answers marked) without running Xerte.
+
+on:
+  pull_request:
+    # run on PRs targeting the default branch; open, update, and reopen
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pull-requests: write   # to post the comment
+  actions: read          # to link to the artifact run
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Render preview HTML
+        run: |
+          python3 tools/render_preview.py source/data.xml preview/index.html
+          # sanity: report page/question counts into the summary
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET, re
+          r = ET.parse('source/data.xml').getroot()
+          pages = [c for c in r if c.tag in ('text','bullets','mcq','quiz')]
+          qs = r.findall('.//question')
+          opts = r.findall('.//option')
+          empty = [o for o in opts if (o.get('text') or '').replace('<p>','').replace('</p>','').strip()=='']
+          print(f"### Preview summary", file=__import__('sys').stdout)
+          print(f"- Pages: **{len(pages)}**", file=__import__('sys').stdout)
+          print(f"- Quiz questions: **{len(qs)}**", file=__import__('sys').stdout)
+          print(f"- Answer options: **{len(opts)}** (empty: {len(empty)})", file=__import__('sys').stdout)
+          if empty:
+            print(f"- ⚠️ {len(empty)} empty option(s) found — these break quizzes.", file=__import__('sys').stdout)
+          print(f"- Pass mark: **{r.get('trackingPassed','?')}**", file=__import__('sys').stdout)
+          PY
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: course-preview
+          path: preview/
+          retention-days: 30
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, 'utf8').trim()
+              .replace(/^### Preview summary\s*/,'');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const artifactUrl = `${runUrl}#artifacts`;
+            const body = [
+              `### 📖 Course content preview`,
+              ``,
+              summary,
+              ``,
+              `Download the **\`course-preview\`** artifact from the workflow run and open \`index.html\` to read the full course (pages + quizzes, correct answers marked ✓):`,
+              `- Workflow run: ${runUrl}`,
+              `- Artifact (scroll to "Artifacts"): ${artifactUrl}`,
+              ``,
+              `> This preview is generated from \`source/data.xml\` by \`tools/render_preview.py\`. It is for review only — the playable SCORM package is built by the release workflow.`,
+            ].join("\n");
+            // find a previous comment from this bot to update, else create
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const marker = "### 📖 Course content preview";
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }

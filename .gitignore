@@ -1,0 +1,19 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Temp / scratch
+*.tmp
+/tmp/
+
+# Generated outputs — never commit these; they are built by CI
+scorm/
+Secure_code_development_scorm.zip
+preview/
+.playwright-mcp/
+
+# Local XOT state (if anyone runs XOT inside this repo by mistake)
+USER-FILES/
+lockfile.txt
