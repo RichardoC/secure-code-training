@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this repo (course source)
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Checkout XOT (docker-container branch) for the Dockerfile
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: RichardoC/xerteonlinetoolkits
           ref: docker-container
@@ -85,7 +85,7 @@ jobs:
           echo "empty options: $(python3 -c "import re,html; x=open('/tmp/check.xml').read(); print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if html.unescape(html.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))")"
 
       - name: Upload artifact (for workflow_dispatch / fallback)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorm-package
           path: out/Secure_code_development_scorm.zip
@@ -93,6 +93,6 @@ jobs:
 
       - name: Attach zip to the release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: out/Secure_code_development_scorm.zip
