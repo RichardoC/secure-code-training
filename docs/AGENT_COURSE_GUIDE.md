@@ -53,7 +53,8 @@ use whatever is free and use it consistently everywhere.
 
 ```bash
 docker rm -f xerte 2>/dev/null
-docker volume create xerte-data xerte-files 2>/dev/null
+docker volume create xerte-data 2>/dev/null
+docker volume create xerte-files 2>/dev/null
 
 docker run -d --name xerte -p 8081:80 \
   -v xerte-data:/var/lib/mysql \
