@@ -2,6 +2,18 @@
 
 [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-blue.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
 
+## Why?
+
+Many organisations have a need for initial security training, and an 
+[LMS](https://en.wikipedia.org/wiki/Learning_management_system) that accepts 
+SCORM. This means that they can show their auditor(s) for SOC2 and ISO27001
+that they're providing relevant training for secure coding practices, and now
+AI agents.
+This course is an attempt to do this publicly so multiple organisations can 
+collaborate at making this training useful, rather than just toil for compliance.
+
+## What?
+
 A SCORM 1.2 e-learning course on secure code development, interleaving the
 **OWASP Top 10:2025** (classic application security) with the **OWASP Top 10
 for Agentic Applications 2026** (AI-agent security). It is organised into seven
