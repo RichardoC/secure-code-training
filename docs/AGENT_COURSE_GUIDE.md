@@ -235,10 +235,15 @@ Select the root `learningObject` node. Set:
   menu + next/back).
 - **Tracking**: the pass mark is the **Tracking** optional property on the root
   (`trackingPassed="80%"`), set via the property panel. `trackingMode` defaults
-  to `full_first`. There is **no per-quiz weighting UI** in Nottingham; the LMS
-  receives the aggregate score across all scored interactions. (A 25/75
-  theme/final weighting would require custom JS in the SCO — not exposed in the
-  editor.)
+  to `full_first` (first completed attempt of each quiz is locked in); this
+  course sets it to `full` so the **last** attempt counts (retries can
+  improve). There is **no per-quiz weighting UI** in Nottingham, but per-quiz
+  weighting **is** supported via the `trackingWeight` attribute on each `<quiz>`
+  (read by `quiz.rlm`'s setup script and passed to `XTSetPageType`), set as a
+  direct attribute write on `data.xml`/`preview.xml`. This course uses
+  `trackingWeight="1"` × 7 theme quizzes + `trackingWeight="21"` for the
+  final → final is 75% of the LMS grade, themes 25%. See
+  `PROJECT_CONTEXT.md` § "SCORM scoring".
 
 ### 4.5 Changing attributes the UI widget won't allow (e.g. delaySecs=0)
 Some property widgets clamp values (e.g. the Bullets "Delay (secs)"
@@ -362,7 +367,10 @@ Check/Next/Restart work and the score is reported.
   preview.xml can overwrite published content on the next Publish.
 - **Lockfiles** are left by interrupted editor sessions; clear them.
 - **SCORM export needs a guest cookie** (bare curl → 0 bytes).
-- **No per-quiz weighting UI** in Nottingham; LMS gets the aggregate score.
+- **No per-quiz weighting UI** in Nottingham, but `trackingWeight` on each
+  `<quiz>` works as a direct attribute write; verified to survive an editor
+  open + Publish round-trip (the `lo_data` loader preserves it and the Publish
+  serializer writes it back), so editor-based edits do not drop it.
 - **Ampersands in titles** are stored as `&amp;amp;` in `name=` attributes but
   render correctly in the player — don't "fix" them.
 - **`access_to_whom`**: new projects are Private; set `Public` in the DB if
