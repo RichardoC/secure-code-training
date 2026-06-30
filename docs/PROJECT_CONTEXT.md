@@ -62,9 +62,10 @@ with agents and building agents.
 - **Final quiz** has **18 distinct questions** (fresh scenarios, not duplicates
   of the theme-quiz questions), mix of single-answer risk-identification and
   true/false.
-- **Pass mark**: `trackingPassed="80%"`, `trackingMode="full_first"`, all quizzes
-  `judge="true"`. SCORM 1.2 score reporting verified (`apiwrapper_1.2.js` +
-  `xttracking_scorm1.2.js` → `cmi.core.score.raw` + `lesson_status`).
+- **Pass mark**: `trackingPassed="80%"`, `trackingMode="full"` (last attempt
+  counts; see "SCORM scoring" below), all quizzes `judge="true"`. SCORM 1.2
+  score reporting verified (`apiwrapper_1.2.js` + `xttracking_scorm1.2.js` →
+  `cmi.core.score.raw` + `lesson_status`).
 - **No Trial MCQ** (an early trial page was removed).
 - `play.php` returns 200; the export is `Secure_code_development_scorm.zip`.
 
@@ -109,46 +110,118 @@ These were agreed with the course owner and must be preserved:
 8. **Ambiguous questions are not acceptable**: each scenario must point to
    exactly one correct answer (the RCE and supply-chain questions were
    rewritten to be unambiguous — see `COURSE_SPEC.md`).
+9. **Validate every `source/data.xml` change through XOT before shipping**
+   (MANDATORY). The release workflow builds the SCORM zip by importing
+   `source/data.xml` into a real XOT instance and exporting, so the file must
+   be accepted by XOT — not just well-formed XML. After any edit, run the
+   XOT validation in §"How to make changes" (push the file into a running
+   XOT instance, confirm `play.php` returns 200 and the editor opens without
+   error, export a SCORM package, and grep the exported `template.xml` to
+   confirm `trackingMode`, `trackingWeight`, `trackingPassed`, the question
+   count, and the empty-option count are all as expected). Do not merge a
+   `source/data.xml` change that has not passed this validation.
 
 ## Known deviations (acknowledged, not to "fix" without asking)
 
-- **No per-quiz weighting (25%/75%)**: Nottingham has no weighting UI; the LMS
-  receives the **aggregate** score across all quiz interactions. The owner
-  accepted this. (A 25/75 split would need custom JS in the SCO.)
+- **Per-quiz weighting is set via the `trackingWeight` attribute** on each
+  `<quiz>` node (7 theme quizzes `trackingWeight="1"`, final quiz
+  `trackingWeight="21"` → final is 21/28 = 75% of the LMS grade, themes
+  7/28 = 25%, matching `COURSE_SPEC.md`). Nottingham has **no UI** for
+  `trackingWeight`; it is set as a direct attribute on `source/data.xml` +
+  `source/preview.xml`. The Xerte HTML5 editor **does** preserve it: the
+  `lo_data` loader reads `trackingWeight` into the in-memory model and the
+  Publish serializer writes it back to `data.xml`/`preview.xml` (verified by
+  an editor open + Publish round-trip — all 8 `trackingWeight` values survived).
+  So editor-based edits are safe; no re-application needed. See "SCORM
+  scoring" below for the full rationale.
 - **Item pages from Theme 2 onward use the "Bullets" page type** (cosmetic;
   rich HTML renders correctly, and `delaySecs="0"` disables the timed reveal).
   Plain Text would be "purer" but converting 27 pages is not worth the risk.
 
+## SCORM scoring (how the LMS grade is computed)
+
+SCORM 1.2 reports **one** `cmi.core.score.raw` (0–100) and **one**
+`cmi.core.lesson_status` for the whole package (SCO). Xerte's
+`xttracking_scorm1.2.js` computes the single score as a **weighted average**
+across all quiz pages, where each quiz's weight is its `trackingWeight`
+attribute (default `1.0` when absent — read by `quiz.rlm`'s setup script and
+passed to `XTSetPageType(..., trackingWeight)`). The `trackingMode` attribute
+on the root controls which attempt is locked in:
+
+| `trackingMode` | `trackingmode` | `scoremode` | effect |
+|---|---|---|---|
+| `full_first` | `full` | `first` | first completed attempt of each quiz counts |
+| `full` | `full` | `last` | **last** completed attempt of each quiz counts (retries can improve) |
+| `minimal_first` | `minimal` | `first` | completion only, first attempt |
+| `minimal` | `minimal` | `last` | completion only, last attempt |
+| `none` | `none` | — | no tracking |
+
+This course uses `trackingMode="full"` (last attempt counts — the questions
+are tricky and learners should not be trapped by a bad first attempt) and
+`trackingWeight` 1/1/…/1/21 so the final comprehensive quiz is **75%** of the
+LMS grade and the seven theme quizzes are **25%** in total, per `COURSE_SPEC.md`.
+
+`cmi.core.lesson_status` is `incomplete` until **every** page in
+`toCompletePages` is completed (all 48 pages are marked for completion — no
+`unmarkForCompletion="true"`); it then becomes `passed`/`failed` against
+`trackingPassed="80%"`. Some LMSs only display/record a grade once status
+leaves `incomplete`, so learners must finish the final quiz and let the
+package fire `LMSFinish` for the grade to post.
+
 ## How to make changes (workflow)
 
-1. `docker start xerte` (if stopped). `curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/` → 200.
+> Host port: the examples use `8081`; on this machine 8081 is taken by another
+> service, so XOT runs on **`8088`** (`-p 8088:80`). Any free host port works —
+> use it consistently. `docker ps` shows the mapped port.
+
+1. `docker start xerte` (if stopped). `curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/` → 200.
 2. Sync preview to data so the editor opens with the latest published content:
    `docker exec xerte sh -c 'cp /var/www/xerte/USER-FILES/1-guest2-Nottingham/data.xml /var/www/xerte/USER-FILES/1-guest2-Nottingham/preview.xml; rm -f /var/www/xerte/USER-FILES/1-guest2-Nottingham/lockfile.txt'`.
-3. `agent-browser open http://localhost:8081/index.php` then
-   `agent-browser open http://localhost:8081/edithtml.php?template_id=1`
+3. `agent-browser open http://localhost:8088/index.php` then
+   `agent-browser open http://localhost:8088/edithtml.php?template_id=1`
    (click "Delete lockfile and continue" if prompted).
 4. Make edits via the UI (`snapshot -i` + `eval`; CKEditor via `setData`).
-   See `AGENT_COURSE_GUIDE.md` §4. **Do not edit `data.xml`/`preview.xml`
-   directly** — author through the editor UI and Publish. (The only legitimate
-   out-of-band file op is the `cp data.xml preview.xml` sync above, and
-   `lo_data` attribute writes via `eval`, which go through the editor's own
-   data model + Publish.)
-5. **Publish** (`eval` click the Publish button).
-6. **Verify**: read-only `docker exec xerte cat …/data.xml`; `curl play.php`;
-   walk the affected pages/quizzes in `play.php` (complete a quiz to check
-   Check/Next/Restart).
+   See `AGENT_COURSE_GUIDE.md` §4. Author through the editor UI and Publish
+   for content changes. The only legitimate out-of-band file ops are: (a) the
+   `cp data.xml preview.xml` sync above, (b) `lo_data` attribute writes via
+   `eval` (which go through the editor's own data model + Publish), and (c)
+   direct attribute edits to `source/data.xml` + `source/preview.xml` for
+   attributes the editor UI does not expose — notably `trackingWeight` (which
+   the editor *does* round-trip safely; see convention 9 + "SCORM scoring").
+   For (c), keep `data.xml` and `preview.xml` byte-identical and push both
+   into the container as in step 4b below.
+5. **Publish** (`eval` click the Publish button) — only needed for UI edits;
+   skip for direct-attribute edits (already in `data.xml`).
+6. **XOT validation (MANDATORY before merge — see convention 9):**
+   - `curl -s -o /dev/null -w 'play=%{http_code}\n' http://localhost:8088/play.php?template_id=1` → 200.
+   - Export a SCORM package (next step) and grep the exported `template.xml`
+     to confirm `trackingMode`, `trackingWeight` (7×`1` + 1×`21`),
+     `trackingPassed="80%"`, question count (45), and empty-option count (0).
+   - If `play.php` is not 200 or the export is missing tracking attrs, the
+     `data.xml` is not valid for XOT — do not merge.
 7. **Re-export SCORM** (needs guest cookie — see guide §7) and update
    `course_backup/` (`cp` the zip + `docker exec xerte cat data.xml > course_backup/data.xml` + same for preview.xml).
 8. Update `COURSE_VERIFICATION.md` if the change affects conformance.
+
+### 4b. Pushing a direct `source/data.xml` edit into XOT (for `trackingWeight` etc.)
+
+```bash
+FOLDER=/var/www/xerte/USER-FILES/1-guest2-Nottingham
+docker cp source/data.xml    "xerte:${FOLDER}/data.xml"
+docker cp source/preview.xml "xerte:${FOLDER}/preview.xml"
+docker exec xerte sh -c "chown www-data:www-data '${FOLDER}/data.xml' '${FOLDER}/preview.xml'; chmod 664 '${FOLDER}/data.xml' '${FOLDER}/preview.xml'; rm -f '${FOLDER}/lockfile.txt'"
+docker exec xerte mariadb --socket=/run/mysqld/mysqld.sock -uroot -proot xerte -e "UPDATE templatedetails SET access_to_whom='Public' WHERE template_id=1;"
+```
+Then continue at step 6 (XOT validation).
 
 ## Re-export command (copy-paste)
 
 ```bash
 COOKIE=/tmp/x.cookies
-curl -s -c "$COOKIE" http://localhost:8081/index.php -o /dev/null
+curl -s -c "$COOKIE" http://localhost:8088/index.php -o /dev/null
 curl -sL -b "$COOKIE" -o Secure_code_development_scorm.zip \
   -w "export HTTP=%{http_code}, size=%{size_download} bytes\n" \
-  "http://localhost:8081/website_code/php/scorm/export.php?scorm=true&template_id=1"
+  "http://localhost:8088/website_code/php/scorm/export.php?scorm=true&template_id=1"
 cp Secure_code_development_scorm.zip course_backup/
 docker exec xerte cat /var/www/xerte/USER-FILES/1-guest2-Nottingham/data.xml > course_backup/data.xml
 docker exec xerte cat /var/www/xerte/USER-FILES/1-guest2-Nottingham/preview.xml > course_backup/preview.xml
@@ -165,10 +238,12 @@ grep -c "Trial MCQ" /tmp/c.xml                 # 0
 grep -oE '<question' /tmp/c.xml | wc -l           # 45 (23 theme + 18 final + 4 …)
 grep -oE 'trackingPassed="[^"]*"' /tmp/c.xml   # 80%
 grep -oE 'judge="true"' /tmp/c.xml | wc -l     # 8
+grep -oE 'trackingWeight="[0-9]+"' /tmp/c.xml   # 7x "1" + 1x "21"
+grep -oE 'trackingMode="[a-z_]+"' /tmp/c.xml   # "full"
 grep -oE 'delaySecs="0"' /tmp/c.xml | wc -l    # 27 (all bullets pages)
 # empty options (must be 0):
 python3 -c "import re,html as H;x=open('/tmp/c.xml').read();print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if H.unescape(H.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))"
-curl -s -o /dev/null -w "play=%{http_code}\n" http://localhost:8081/play.php?template_id=1   # 200
+curl -s -o /dev/null -w "play=%{http_code}\n" http://localhost:8088/play.php?template_id=1   # 200
 ```
 Then open `play.php` in a browser, walk a theme quiz and the final quiz
 end-to-end (answer → Check → Next → complete → Restart) to confirm the UI works.
@@ -177,8 +252,7 @@ end-to-end (answer → Check → Next → complete → Restart) to confirm the U
 
 - Convert the 27 Bullets content pages to Plain Text for "purer" page types
   (cosmetic only; current state renders fine with no auto-play).
-- Add the 25%/75% theme/final weighting via custom SCO JS (Nottingham has no
-  UI for it; owner declined).
+
 - Rewrite the remaining incident callouts (Replit, Gemini, Amazon Q, etc.) in
   the same plain self-contained style as the ASI03 callout — they already
   explain their scenario in the body, but could be made more uniform.

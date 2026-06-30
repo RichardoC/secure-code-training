@@ -82,6 +82,19 @@ Two fixes applied per user request, then re-exported:
 2. **Final comprehensive quiz expanded from 6 to 18 questions** ✅ — covers all
    themes with single-answer, multiple-response, and true/false items; correct
    answers verified on all 18. Total questions now 41 (23 theme + 18 final).
+3. **Per-quiz weighting + last-attempt scoring applied** ✅ — `trackingWeight`
+   added to every `<quiz>` (7 theme quizzes `="1"`, final `="21"` → final is
+   75% of the LMS grade, themes 25%), and root `trackingMode` changed from
+   `full_first` to `full` so the **last** attempt of each quiz counts (learners
+   can retry tricky questions without being trapped by a bad first attempt).
+   Nottingham has no UI for `trackingWeight`; it is set directly on
+   `source/data.xml` + `source/preview.xml`. **Validated through XOT**
+   (2026-06-30): pushed into a running XOT instance, `play.php` returned 200,
+   the HTML5 editor opened and loaded `trackingWeight` into `lo_data`, a
+   Publish round-trip preserved all 8 `trackingWeight` values in `data.xml`,
+   and the SCORM export carried `trackingMode="full"` + `trackingWeight`
+   1×7 + 21 into `template.xml`. See `PROJECT_CONTEXT.md` § "SCORM scoring"
+   and convention 9 (XOT validation is now mandatory before merge).
 
 Remaining minor deviations (not requested to fix):
 
@@ -89,9 +102,6 @@ Remaining minor deviations (not requested to fix):
   Theme 2 Quiz node (Nottingham's `quiz` only accepts `question` children;
   nesting failed for Theme 2). Functionally equivalent — still scored and
   SCORM-tracked. Structural deviation from other themes' nested pattern.
-- **Theme/final weighting (25%/75%) not applied** (per user, not a concern).
-  The 80% pass mark is set; the LMS receives the aggregate score across all
-  quiz interactions.
 - **Content page type**: item pages from Theme 2 onward are "Bullets / Timed
   Content" pages rather than "Plain Text". Cosmetic only — rich HTML renders
   correctly in the player (verified).
@@ -99,5 +109,6 @@ Remaining minor deviations (not requested to fix):
 ## Final SCORM export
 `Secure_code_development_scorm.zip` (13 MB, SCORM 1.2, one SCO,
 `scormRLO.htm`, `apiwrapper_1.2.js` + `xttracking_scorm1.2.js` for LMS scoring,
-`trackingPassed="80%"`). Backups in `course_backup/`. The course now fulfills
+`trackingPassed="80%"`, `trackingMode="full"`, per-quiz `trackingWeight`
+1×7 + 21). Backups in `course_backup/`. The course now fulfills
 the specification in all major respects.
