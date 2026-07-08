@@ -67,6 +67,8 @@ with agents and building agents.
   score reporting verified (`apiwrapper_1.2.js` + `xttracking_scorm1.2.js` →
   `cmi.core.score.raw` + `lesson_status`).
 - **No Trial MCQ** (an early trial page was removed).
+- **Welcome page carries `unmarkForCompletion="true"`** — see "SCORM completion
+  bug fix" below for why; it is the fix for LMS completion tracking.
 - `play.php` returns 200; the export is `Secure_code_development_scorm.zip`.
 
 ## Conventions (MANDATORY for any content changes)
@@ -137,6 +139,57 @@ These were agreed with the course owner and must be preserved:
 - **Item pages from Theme 2 onward use the "Bullets" page type** (cosmetic;
   rich HTML renders correctly, and `delaySecs="0"` disables the timed reveal).
   Plain Text would be "purer" but converting 27 pages is not worth the risk.
+
+## SCORM completion bug fix (0.0.4 — `unmarkForCompletion` on Welcome)
+
+**Symptom**: on LMS the course reported **0% completion**
+even though the learner finished every quiz and `cmi.core.score.raw` was
+being sent (75, then 100). `cmi.core.lesson_status` was never reported as
+`passed`/`completed`/`failed`.
+
+**Root cause** (a Xerte Nottingham engine bug, worked around at the content
+level): with `navigation="Menu with Page Controls"`, Xerte inserts a built-in
+Table-of-Contents page as `x_pages[0]` **after** `toCompletePages` is built
+from `currActPage` over the 43 content nodes. So every content page's
+`page_nr` (used by `exitInteraction` to mark `completedPages[i]`) is
+`currActPage + 1` — a systematic **off-by-one**:
+
+- `toCompletePages[0] == 0` is only matched by `page_nr == 0` (the menu),
+  which is never exited (menu pages are excluded from `x_endPageTracking`),
+  so `completedPages[0]` (the first content page, "Welcome") stayed `false`
+  forever.
+- The last content page (Final quiz, `page_nr == 43`) had no
+  `toCompletePages` entry, so its completion was lost too.
+- `getSuccessStatus()` returns `'incomplete'` whenever any `completedPages[i]`
+  is `false`, so `finishTracking()` set `cmi.core.lesson_status='incomplete'`
+  (a no-op against Moodle's pre-set 'incomplete'), and the LMS never left the
+  incomplete state.
+
+**Fix**: add `unmarkForCompletion="true"` to the **first content page**
+("Welcome & how to use this course", `linkID="PG1781882348053"`) in
+`source/data.xml` + `source/preview.xml`. This makes `markedPages` skip
+`currActPage == 0`, so `toCompletePages` becomes `[1,2,…,42]`, which now
+matches the content pages' `page_nr` values (`1…42`). `completedPages[0]`
+(Welcome) is now marked `true` when the learner leaves it, and when all
+tracked pages are visited `getSuccessStatus()` returns `passed`/`failed`
+against `trackingPassed="80%"`. Verified locally with a SCORM 1.2 mock API:
+a completed run sends `cmi.core.lesson_status="passed"`, `cmi.core.exit=""`,
+`cmi.core.score.raw`, `score.min`, `score.max`, and `cmi.core.session_time`.
+
+**Trade-off**: the Final quiz (`page_nr == 43`) is still not in
+`toCompletePages` (there is no index 43), so its *completion* is not tracked
+in `completedPages` — but its *score* is still tracked via its interactions
+and `trackingWeight="21"`, so the LMS grade and pass/fail are correct. The
+Welcome page is no longer "required" for completion, which is acceptable for
+an intro page. A proper fix would be in the Xerte engine (`xenith.js`: build
+`toCompletePages` from `page_nr` after the menu is inserted, or do not insert
+the menu into `x_pages` for tracking); this content workaround is used because
+the release workflow builds from the XOT engine and an engine patch would not
+persist across XOT rebuilds.
+
+**Do not remove `unmarkForCompletion="true"` from the Welcome page** without
+a replacement fix — re-introducing the off-by-one will silently break LMS
+completion reporting again.
 
 ## SCORM scoring (how the LMS grade is computed)
 

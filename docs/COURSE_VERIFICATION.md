@@ -112,3 +112,36 @@ Remaining minor deviations (not requested to fix):
 `trackingPassed="80%"`, `trackingMode="full"`, per-quiz `trackingWeight`
 1×7 + 21). Backups in `course_backup/`. The course now fulfills
 the specification in all major respects.
+
+## LMS completion fix (post-0.0.3)
+
+**Problem reported on LMS **: the 0.0.3 release reported
+**0% completion** to the LMS even though the learner finished every quiz.
+A HAR capture showed `cmi.core.score.raw` was sent (75, then 100) but
+`cmi.core.lesson_status` was never reported as `passed`/`completed`/`failed`,
+and `cmi.core.suspend_data.completedPages` was `[false, true, true, …]` —
+index 0 (the first content page, "Welcome") was never marked complete.
+
+**Root cause**: a Xerte Nottingham off-by-one between `toCompletePages`
+(built from `currActPage` over the 43 content nodes, before the built-in
+Table-of-Contents menu page is inserted as `x_pages[0]`) and `page_nr` (used
+by `exitInteraction`, which is `currActPage + 1` for every content page
+because the menu takes `page_nr == 0`). `completedPages[0]` could only be set
+by exiting the menu (which never happens), so `getSuccessStatus()` always
+returned `'incomplete'`. Full analysis in `PROJECT_CONTEXT.md` § "SCORM
+completion bug fix".
+
+**Fix applied**: `unmarkForCompletion="true"` on the Welcome page
+(`linkID="PG1781882348053"`) in `source/data.xml` + `source/preview.xml`,
+shifting `toCompletePages` to `[1,2,…,42]` so it aligns with the content
+pages' `page_nr`. Verified locally with a SCORM 1.2 mock API harness: a
+completed run now sends `cmi.core.lesson_status="passed"` (+ `exit`,
+`score.raw`, `score.min`, `score.max`, `session_time`).
+
+**Pending (convention 9 — MANDATORY before merge)**: push the updated
+`source/data.xml` + `source/preview.xml` into a running XOT instance,
+confirm `play.php` returns 200, export a SCORM package, and grep the exported
+`template.xml` to confirm `unmarkForCompletion="true"` is present on the
+Welcome page and the question count / `trackingWeight` / `trackingPassed` /
+empty-option count are unchanged. Then re-test on LMS that a
+completed attempt reports `lesson_status=passed` and a non-zero grade.
