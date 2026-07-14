@@ -257,6 +257,43 @@ re-introducing the terminate-only commit will silently revert to
 would just call `doLMSCommit` a second time, which is idempotent) and can be
 dropped.
 
+## Build version stamping (`{{BUILD_VERSION}}` placeholder)
+
+So an operator can tell **which version is running** in an LMS, the SCORM
+package carries a build stamp in two places:
+
+1. **Visible in the player** — the About page (page 2) has a `Build` section
+   with a line `<p><strong>Version:</strong> {{BUILD_VERSION}} …</p>`. The
+   `{{BUILD_VERSION}}` token is a **placeholder** committed in `source/data.xml`
+   + `source/preview.xml`.
+2. **Machine-readable** — the release workflow adds a `VERSION.txt` (version,
+   build timestamp, full commit SHA, source tree URL) to the zip root.
+
+**Who substitutes the placeholder:**
+- **Release workflow** (`.github/workflows/release.yml`): a `Compute build
+  version` step derives `v<tag> (YYYY-MM-DD, commit <short>)` for release events
+  (`github.ref_name` = tag) or `dev (…, workflow_dispatch)` for manual runs; an
+  `Inject build version into course content` step `python3`-replaces
+  `{{BUILD_VERSION}}` in `source/data.xml` + `source/preview.xml` **before** the
+  XOT import, so the substituted value is what gets exported. The `Verify the
+  package` step fails the build if `{{BUILD_VERSION}}` remains in the exported
+  `template.xml`.
+- **Preview workflow** (`.github/workflows/preview.yml`): a `Set preview build
+  label` step substitutes `{{BUILD_VERSION}}` → `preview (PR #N, commit <short>)`
+  before `render_preview.py`, so PR preview HTML shows a clean build line instead
+  of the raw token.
+
+**Why a placeholder (not a committed version):** the version is only known at
+release time (the git tag), so it cannot be baked into committed source. The
+placeholder keeps `source/data.xml` version-agnostic and is a valid, static
+value that round-trips through the XOT editor (verified: a Publish cycle
+preserves `{{BUILD_VERSION}}` intact — CKEditor does not mangle the braces).
+
+**Do not remove the `{{BUILD_VERSION}}` placeholder** from the About page
+without a replacement — the release workflow's verify step expects it to be
+present before substitution and absent after, and that check guards against
+silent version-stamping regressions.
+
 ## SCORM scoring (how the LMS grade is computed)
 
 SCORM 1.2 reports **one** `cmi.core.score.raw` (0–100) and **one**
@@ -362,6 +399,10 @@ grep -oE 'trackingMode="[a-z_]+"' /tmp/c.xml   # "full"
 grep -oE 'delaySecs="0"' /tmp/c.xml | wc -l    # 27 (all bullets pages)
 grep -c 'xPersistProgress' /tmp/c.xml        # 1 (SCORM autosave script present on root)
 grep -oE 'unmarkForCompletion="true"' /tmp/c.xml | wc -l  # 1 (Welcome page)
+# build version: in a release export {{BUILD_VERSION}} is substituted; in source/preview it is the placeholder
+grep -oE 'Version:</strong> [^<&]*' /tmp/c.xml              # e.g. 'Version:</strong> v0.0.6 (...)'
+grep -c '{{BUILD_VERSION}}' /tmp/c.xml                     # 0 in a release export (1 in committed source)
+unzip -p Secure_code_development_scorm.zip VERSION.txt     # present in release builds
 # empty options (must be 0):
 python3 -c "import re,html as H;x=open('/tmp/c.xml').read();print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if H.unescape(H.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))"
 curl -s -o /dev/null -w "play=%{http_code}\n" http://localhost:8088/play.php?template_id=1   # 200

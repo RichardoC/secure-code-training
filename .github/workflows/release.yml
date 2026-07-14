@@ -26,6 +26,20 @@ jobs:
           ref: docker-container
           path: xote
 
+      - name: Compute build version
+        id: ver
+        run: |
+          short=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%d)
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # On release publish, github.ref_name is the tag (e.g. v0.0.6)
+            ver="${{ github.ref_name }} ($date, commit $short)"
+          else
+            ver="dev ($date, commit $short, ${{ github.event_name }})"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Build version: $ver"
+
       - name: Build the xerte image
         working-directory: xote
         run: docker build -t xerte .
@@ -46,6 +60,20 @@ jobs:
             echo "waiting... ($code)"; sleep 2
           done
           curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:8081/
+
+      - name: Inject build version into course content
+        run: |
+          set -e
+          python3 - "${{ steps.ver.outputs.version }}" source/data.xml source/preview.xml <<'PY'
+          import sys, pathlib
+          ver = sys.argv[1]
+          for fn in sys.argv[2:]:
+              p = pathlib.Path(fn)
+              s = p.read_text(encoding='utf-8')
+              assert '{{BUILD_VERSION}}' in s, f"{fn}: {{BUILD_VERSION}} placeholder not found"
+              p.write_text(s.replace('{{BUILD_VERSION}}', ver), encoding='utf-8')
+              print(f"injected {ver!r} into {fn}")
+          PY
 
       - name: Create project and import course content
         run: |
@@ -76,14 +104,32 @@ jobs:
             "http://localhost:8081/website_code/php/scorm/export.php?scorm=true&template_id=${{ env.template_id }}"
           ls -la out/
 
+      - name: Add VERSION.txt to the package
+        run: |
+          set -e
+          printf 'Secure code development\nVersion: %s\nBuilt: %s\nCommit: %s\nSource: %s\n' \
+            "${{ steps.ver.outputs.version }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}" \
+            > out/VERSION.txt
+          (cd out && zip Secure_code_development_scorm.zip VERSION.txt)
+          echo "--- VERSION.txt in package ---"
+          unzip -p out/Secure_code_development_scorm.zip VERSION.txt
+
       - name: Verify the package
         run: |
+          set -e
           unzip -l out/Secure_code_development_scorm.zip | head
           unzip -p out/Secure_code_development_scorm.zip imsmanifest.xml | grep -oE 'schemaversion>[^<]*|scormtype="[a-z]*"'
           unzip -p out/Secure_code_development_scorm.zip template.xml > /tmp/check.xml
           echo "questions: $(grep -oE '<question' /tmp/check.xml | wc -l | tr -d ' ')"
           echo "pass mark: $(grep -oE 'trackingPassed="[^"]*"' /tmp/check.xml)"
           echo "empty options: $(python3 -c "import re,html; x=open('/tmp/check.xml').read(); print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if html.unescape(html.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))")"
+          # build version was injected (placeholder must be gone, label must show)
+          if grep -q '{{BUILD_VERSION}}' /tmp/check.xml; then
+            echo "ERROR: {{BUILD_VERSION}} placeholder was not substituted"; exit 1
+          fi
+          echo "build version in About page: $(grep -oE 'Version:</strong> [^<&]*' /tmp/check.xml | head -1)"
+          echo "VERSION.txt in package: $(unzip -l out/Secure_code_development_scorm.zip | grep -c VERSION.txt)"
 
       - name: Upload artifact (for workflow_dispatch / fallback)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
