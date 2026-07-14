@@ -69,6 +69,9 @@ with agents and building agents.
 - **No Trial MCQ** (an early trial page was removed).
 - **Welcome page carries `unmarkForCompletion="true"`** — see "SCORM completion
   bug fix" below for why; it is the fix for LMS completion tracking.
+- **Root `<learningObject>` carries a `script="..."` attribute** (SCORM
+  autosave) — see "SCORM autosave on progress" below; it makes results report
+  to the LMS as the learner progresses instead of only on Save Session.
 - `play.php` returns 200; the export is `Secure_code_development_scorm.zip`.
 
 ## Conventions (MANDATORY for any content changes)
@@ -191,6 +194,69 @@ persist across XOT rebuilds.
 a replacement fix — re-introducing the off-by-one will silently break LMS
 completion reporting again.
 
+## SCORM autosave on progress (root `script` attribute)
+
+**Symptom**: on LMS, results (`cmi.core.score.raw`, `cmi.core.lesson_status`,
+interactions, `suspend_data`) were only reported to the LMS when the learner
+clicked **Save Session** (or the window unloaded). If the LMS viewer unloaded
+the SCO without reliably firing `onbeforeunload`, nothing was reported and the
+gradebook stayed empty mid-attempt.
+
+**Root cause** (Xerte Nottingham engine behaviour, **not** a bug we can fix in
+content via the engine files — the release workflow builds the engine from the
+`docker-container` branch of `RichardoC/xerteonlinetoolkits`, so engine JS
+edits do not persist): in `xttracking_scorm1.2.js`, `exitInteraction()` (called
+on every page leave / quiz answer) issues many `LMSSetValue` calls but **never**
+calls `LMSCommit`. `doLMSCommit()` is called **only** inside `finishTracking()`,
+which is called **only** from `XTTerminate()` (Save Session / `onbeforeunload`).
+SCORM 1.2 only persists `LMSSetValue` to the LMS backend on `LMSCommit`, so all
+progress stayed in the API adapter's in-memory model until terminate. Worse,
+`cmi.core.score.raw` and `cmi.core.lesson_status` are *set* only inside
+`finishTracking()`, so even a mid-session commit would not update the grade.
+
+**Fix** (content-level, no engine/vendoring change): a `script="..."` attribute
+on the `<learningObject>` root in `source/data.xml` + `source/preview.xml`.
+`script` is an **official, optional Nottingham root property** (wizard
+`data.xwd` line 261: *"Add JavaScript to this project. The code will run after
+the project interface has been set up but before any pages have loaded"*);
+xenith.js injects it once globally via `$x_head.append('<script>' +
+x_params.script + '</script>')` (line 2269). The script:
+
+1. Defines `persist()` — replays the score/status half of `finishTracking()`
+   (`cmi.core.lesson_status`, `cmi.core.score.raw/min/max`, `cmi.core.exit`,
+   `cmi.suspend_data`) then calls `doLMSCommit()`, using the engine's own global
+   `state` object (`state.getSuccessStatus()`, `state.getRawScore()`,
+   `state.getVars()`). Guards on `state.initialised`, `state.scormmode ===
+   'normal'`, `state.trackingmode !== 'none'`, `state.finished`, and the
+   presence of `doLMSCommit`/`state.getSuccessStatus` so it is a no-op outside a
+   live SCORM `normal` session (e.g. `play.php`, xAPI, noop tracking).
+2. Wraps the global `XTExitPage` and `XTExitInteraction` so every page leave and
+   quiz answer flushes immediately — the gradebook updates as the learner
+   progresses.
+3. A 30 s `setInterval` heartbeat as a safety net (idle learners, or LMS
+   viewers that unload without events), and a `pagehide` listener as a backup
+   flush if `onbeforeunload` does not fire.
+
+**Why this is safe and durable**: it is content, so the release workflow
+exports it as part of `data.xml`/`template.xml` with no engine change. The
+editor round-trips it: `build_lo_data` (toolbox.js) loads **all** root
+attributes including `script`, and `editor/upload.php` `process()` re-adds
+**every** attribute via `addAttribute` (no filtering by wizard-declared names).
+Verified by an editor open → Publish round-trip: `script` survived in
+`data.xml` byte-for-byte (timestamp updated, attribute intact). `makeAbsolute`
+only rewrites `FileLocation + '...'` media refs (absent from the script) and
+`addLineBreaks` only applies to textinput/textarea types, so the JS is not
+mangled. The script attribute value contains no XML-special characters (`&`,
+`<`, `>`, `"` — single quotes only, `!== -1` instead of `>= 0`, nested `if`s
+instead of `&&`), so it sits raw in the XML with no escaping concerns.
+
+**Do not remove or empty the root `script` attribute** without a replacement —
+re-introducing the terminate-only commit will silently revert to
+"results only on Save". If the engine is ever patched upstream to commit on
+`exitInteraction`, this `script` becomes redundant (harmless — its `persist()`
+would just call `doLMSCommit` a second time, which is idempotent) and can be
+dropped.
+
 ## SCORM scoring (how the LMS grade is computed)
 
 SCORM 1.2 reports **one** `cmi.core.score.raw` (0–100) and **one**
@@ -294,6 +360,8 @@ grep -oE 'judge="true"' /tmp/c.xml | wc -l     # 8
 grep -oE 'trackingWeight="[0-9]+"' /tmp/c.xml   # 7x "1" + 1x "21"
 grep -oE 'trackingMode="[a-z_]+"' /tmp/c.xml   # "full"
 grep -oE 'delaySecs="0"' /tmp/c.xml | wc -l    # 27 (all bullets pages)
+grep -c 'xPersistProgress' /tmp/c.xml        # 1 (SCORM autosave script present on root)
+grep -oE 'unmarkForCompletion="true"' /tmp/c.xml | wc -l  # 1 (Welcome page)
 # empty options (must be 0):
 python3 -c "import re,html as H;x=open('/tmp/c.xml').read();print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if H.unescape(H.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))"
 curl -s -o /dev/null -w "play=%{http_code}\n" http://localhost:8088/play.php?template_id=1   # 200

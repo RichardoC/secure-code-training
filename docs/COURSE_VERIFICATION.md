@@ -145,3 +145,40 @@ confirm `play.php` returns 200, export a SCORM package, and grep the exported
 Welcome page and the question count / `trackingWeight` / `trackingPassed` /
 empty-option count are unchanged. Then re-test on LMS that a
 completed attempt reports `lesson_status=passed` and a non-zero grade.
+
+## SCORM autosave on progress (root `script` attribute)
+
+**Problem**: results (`cmi.core.score.raw`, `cmi.core.lesson_status`,
+interactions, `suspend_data`) were only reported to the LMS when the learner
+clicked **Save Session** (or the window unloaded). The engine's
+`exitInteraction()` calls `LMSSetValue` but never `LMSCommit`, and
+`finishTracking()` (which commits and sets score/status) runs only at
+`XTTerminate()` (Save / `onbeforeunload`). So nothing flushed mid-session.
+
+**Fix applied** (content-level, no engine change): a `script="..."` attribute
+on the `<learningObject>` root in `source/data.xml` + `source/preview.xml` —
+an official Nottingham root property (wizard `data.xwd` line 261) that xenith
+injects once globally before pages load. The script wraps the global
+`XTExitPage`/`XTExitInteraction` to call a `persist()` helper after every page
+leave / quiz answer: it sets `cmi.core.lesson_status`, `cmi.core.score.raw/min/max`,
+`cmi.core.exit`, `cmi.suspend_data` from the engine's own global `state`, then
+calls `doLMSCommit()`. A 30 s heartbeat and `pagehide` listener are safety
+nets. Guards make it a no-op outside a live SCORM `normal` session.
+
+**Verified**:
+- `play.php` returns 200; editor opens (200) and a **Publish round-trip
+  preserved the `script` attribute** in `data.xml` byte-for-byte (editor loads
+  all root attrs via `build_lo_data`; `upload.php` `process()` re-adds every
+  attr — no filtering).
+- Fresh SCORM export's `template.xml` carries the script (`xPersistProgress`
+  count = 1); all content/tracking attrs unchanged (45 questions, 80% pass,
+  `trackingMode=full`, `trackingWeight` 1×7 + 21, `unmarkForCompletion`×1, 0
+  empty options, 27 `delaySecs=0`).
+- Mock SCORM 1.2 API harness loading the **original unpatched engine JS** +
+  this script: **5 commits fire during progress** (score 0→100 as a quiz is
+  answered) vs **0** without the script (only 1 commit on terminate). See
+  `PROJECT_CONTEXT.md` § "SCORM autosave on progress" for full detail.
+
+**Pending (convention 9 — re-test on LMS)**: confirm a learner attempt now
+shows the gradebook updating incrementally (not only on Save), and that a
+completed attempt still reports `lesson_status=passed` with a non-zero grade.
