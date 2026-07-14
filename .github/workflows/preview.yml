@@ -27,6 +27,23 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set preview build label
+        run: |
+          set -e
+          short=$(git rev-parse --short HEAD)
+          ver="preview (PR ${{ github.event.pull_request.number }}, commit $short)"
+          python3 - "$ver" source/data.xml <<'PY'
+          import sys, pathlib
+          ver = sys.argv[1]
+          p = pathlib.Path('source/data.xml')
+          s = p.read_text(encoding='utf-8')
+          if '{{BUILD_VERSION}}' in s:
+              p.write_text(s.replace('{{BUILD_VERSION}}', ver), encoding='utf-8')
+              print(f"preview build label: {ver}")
+          else:
+              print("no {{BUILD_VERSION}} placeholder found (skipping)")
+          PY
+
       - name: Render preview HTML
         run: |
           python3 tools/render_preview.py source/data.xml preview/index.html

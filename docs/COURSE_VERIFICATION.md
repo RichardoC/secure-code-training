@@ -182,3 +182,27 @@ nets. Guards make it a no-op outside a live SCORM `normal` session.
 **Pending (convention 9 — re-test on LMS)**: confirm a learner attempt now
 shows the gradebook updating incrementally (not only on Save), and that a
 completed attempt still reports `lesson_status=passed` with a non-zero grade.
+
+## Build version stamping (`{{BUILD_VERSION}}` placeholder)
+
+So an operator can tell which version is running in an LMS, the About page
+(page 2) carries a `Build` section with a `{{BUILD_VERSION}}` placeholder,
+and the release workflow adds a `VERSION.txt` to the zip. The placeholder is
+committed in `source/data.xml` + `source/preview.xml` and substituted at build
+time: the **release workflow** injects `v<tag> (date, commit <short>)` before
+the XOT export (and fails the build if the token remains in the export), and
+the **preview workflow** injects `preview (PR #N, commit <short>)` before
+rendering so PR preview HTML shows a clean build line.
+
+**Verified locally** (simulating the release workflow end-to-end through the
+running XOT): substituted `{{BUILD_VERSION}}` → `v0.0.6 (2026-07-14, commit
+abc1234)` in `source/data.xml` + `source/preview.xml`, pushed into XOT,
+`play.php` returned 200, re-exported SCORM — the exported `template.xml`
+shows the substituted `Version:</strong> v0.0.6 (…)` line on the About page,
+0 `{{BUILD_VERSION}}` placeholders remain, and a `VERSION.txt` was added to
+the zip root. All content/tracking attrs unchanged (45 questions, 80% pass,
+`trackingMode=full`, `trackingWeight` 1×7 + 21, `unmarkForCompletion`×1, 0
+empty options, 27 `delaySecs=0`, autosave script present). A Publish
+round-trip preserved the `{{BUILD_VERSION}}` placeholder intact in
+`data.xml` (CKEditor does not mangle the braces). See `PROJECT_CONTEXT.md` §
+"Build version stamping" for full detail.

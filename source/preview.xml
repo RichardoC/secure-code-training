@@ -42,6 +42,10 @@
 <h2>Provenance</h2>
 
 <p>Generated with the <strong>pi coding-agent harness v0.79.8</strong> using LLM models <strong>glm-5.2</strong> and <strong>kimi k2.7-coder</strong>. Not endorsed by OWASP.</p>
+
+<h2>Build</h2>
+
+<p><strong>Version:</strong> {{BUILD_VERSION}} &mdash; this identifies the SCORM package build so you can tell which version is running in your LMS.</p>
 ]]></text><text linkID="PG1781883865808" name="Introduction to secure code development"><![CDATA[<h2>What is secure code development?</h2>
 
 <p>Secure code development is the practice of designing, writing, reviewing, and maintaining software so that it can withstand malicious or accidental misuse. It is not a final coat of paint applied after the features are finished; it shapes the requirements, the architecture, and the day-to-day coding decisions that engineers make.</p>
