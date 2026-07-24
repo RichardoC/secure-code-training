@@ -47,9 +47,13 @@ with agents and building agents.
 
 ## Current state of the course (as last exported)
 
-- **48 learner pages** in spec order: front matter (4) → 7 themes (each: intro +
-  classic item page(s) + agentic item page(s) + theme quiz) → back matter (4:
-  secure-SDLC integration, mapping, glossary, references) → final quiz.
+- **44 top-level pages** in `source/data.xml` (43 learner content/quiz pages + 1
+  final **"Course complete"** page added after the final quiz so it is clear the
+  training is over): front matter (4) → 7 themes (each: intro + classic item
+  page(s) + agentic item page(s) + theme quiz) → back matter (4: secure-SDLC
+  integration, mapping, glossary, references) → final quiz → Course complete.
+  (Earlier docs/reports may say 43 or 48; the authoritative count is whatever
+  is in `source/data.xml`.)
 - **Content page types**: pages 1–8 are `text` (Plain Text); pages from Theme 2
   onward are `bullets` (Bullets/Timed Content) with **`delaySecs="0"`** so they
   do **not** auto-play (a deliberate fix — see "Conventions" below).
@@ -59,6 +63,14 @@ with agents and building agents.
   nested `<question>` children. **45 scored questions total** (23 theme +
   18 final + 4 … see `COURSE_VERIFICATION.md`). Every question has ≥2 options
   and ≥1 `correct="true"`; **no empty option nodes**.
+- **Option order is randomised per attempt**: every `<question>` carries
+  `answerOrder="random"` (the Nottingham wizard's per-question "Answer Order"
+  property; see `quiz.xwd` and `models_html5/quiz.html` line ~165). The HTML5
+  player shuffles each question's options on quiz load/restart, and scoring is
+  computed from the shuffled array so SCORM tracking stays correct. This
+  removes the previous bias where the correct answer was frequently the first
+  option (especially in the final quiz). The attribute is editor-declared, so
+  the XOT HTML5 editor round-trips it natively (like `trackingWeight`).
 - **Final quiz** has **18 distinct questions** (fresh scenarios, not duplicates
   of the theme-quiz questions), mix of single-answer risk-identification and
   true/false.
@@ -84,8 +96,7 @@ These were agreed with the course owner and must be preserved:
    Applications 2026, genai.owasp.org, CC BY-SA 4.0; OWASP Top 10:2025,
    owasp.org/Top10/2025/, CC BY 3.0); a "changes were made" notice; a
    "not endorsed by OWASP" notice; and **provenance**:
-   *"Generated with the pi coding-agent harness v0.79.8 using LLM models
-   glm-5.2 and kimi k2.7-coder."*
+   *"Generated with the assistance of an AI coding agent."*
 2. **Acronym expansion**: the first time a security acronym is used **on a
    page**, give the full form in brackets, e.g. `TOCTOU (Time-of-check to
    time-of-use)`. Reuse the acronym thereafter on that page; expand again on the
@@ -125,6 +136,14 @@ These were agreed with the course owner and must be preserved:
    confirm `trackingMode`, `trackingWeight`, `trackingPassed`, the question
    count, and the empty-option count are all as expected). Do not merge a
    `source/data.xml` change that has not passed this validation.
+10. **Option order must be randomised per attempt**: every `<question>` must
+    carry `answerOrder="random"` (Nottingham wizard's per-question "Answer
+    Order" property, `quiz.xwd`; honoured by `models_html5/quiz.html`). This
+    shuffles each question's options on quiz load/restart and removes the
+    pattern of the correct answer always being the first option. Scoring is
+    computed from the shuffled array, so SCORM tracking is unaffected. When
+    adding a new question, set `answerOrder="random"` on it. Keep `data.xml`
+    and `preview.xml` byte-identical.
 
 ## Known deviations (acknowledged, not to "fix" without asking)
 
@@ -153,7 +172,9 @@ being sent (75, then 100). `cmi.core.lesson_status` was never reported as
 **Root cause** (a Xerte Nottingham engine bug, worked around at the content
 level): with `navigation="Menu with Page Controls"`, Xerte inserts a built-in
 Table-of-Contents page as `x_pages[0]` **after** `toCompletePages` is built
-from `currActPage` over the 43 content nodes. So every content page's
+from `currActPage` over the content nodes (43 when this fix was designed;
+44 now that a **Course complete** page follows the final quiz — the analysis
+is identical, only the last `page_nr` shifts). So every content page's
 `page_nr` (used by `exitInteraction` to mark `completedPages[i]`) is
 `currActPage + 1` — a systematic **off-by-one**:
 
@@ -179,16 +200,19 @@ against `trackingPassed="80%"`. Verified locally with a SCORM 1.2 mock API:
 a completed run sends `cmi.core.lesson_status="passed"`, `cmi.core.exit=""`,
 `cmi.core.score.raw`, `score.min`, `score.max`, and `cmi.core.session_time`.
 
-**Trade-off**: the Final quiz (`page_nr == 43`) is still not in
-`toCompletePages` (there is no index 43), so its *completion* is not tracked
-in `completedPages` — but its *score* is still tracked via its interactions
-and `trackingWeight="21"`, so the LMS grade and pass/fail are correct. The
-Welcome page is no longer "required" for completion, which is acceptable for
-an intro page. A proper fix would be in the Xerte engine (`xenith.js`: build
-`toCompletePages` from `page_nr` after the menu is inserted, or do not insert
-the menu into `x_pages` for tracking); this content workaround is used because
-the release workflow builds from the XOT engine and an engine patch would not
-persist across XOT rebuilds.
+**Trade-off** (with the Course complete page now present): the *last* content
+node — the **Course complete** page (`page_nr == 44`), a static
+acknowledgement page — is not in `toCompletePages` (there is no index 44), so
+its *completion* is not tracked; this is harmless (it carries no score and no
+interaction). The Final quiz (`page_nr == 43`) **is** now in
+`toCompletePages`, so its completion is tracked, and its *score* is tracked
+via its interactions and `trackingWeight="21"`. The Welcome page is no longer
+"required" for completion, which is acceptable for an intro page. A proper
+fix would be in the Xerte engine (`xenith.js`: build `toCompletePages` from
+`page_nr` after the menu is inserted, or do not insert the menu into `x_pages`
+for tracking); this content workaround is used because the release workflow
+builds from the XOT engine and an engine patch would not persist across XOT
+rebuilds.
 
 **Do not remove `unmarkForCompletion="true"` from the Welcome page** without
 a replacement fix — re-introducing the off-by-one will silently break LMS
@@ -392,6 +416,7 @@ unzip -p Secure_code_development_scorm.zip template.xml | grep -oE 'trackingPass
 unzip -p Secure_code_development_scorm.zip template.xml > /tmp/c.xml
 grep -c "Trial MCQ" /tmp/c.xml                 # 0
 grep -oE '<question' /tmp/c.xml | wc -l           # 45 (23 theme + 18 final + 4 …)
+grep -oE 'answerOrder="random"' /tmp/c.xml | wc -l  # 45 (every question shuffles options per attempt)
 grep -oE 'trackingPassed="[^"]*"' /tmp/c.xml   # 80%
 grep -oE 'judge="true"' /tmp/c.xml | wc -l     # 8
 grep -oE 'trackingWeight="[0-9]+"' /tmp/c.xml   # 7x "1" + 1x "21"
@@ -399,6 +424,7 @@ grep -oE 'trackingMode="[a-z_]+"' /tmp/c.xml   # "full"
 grep -oE 'delaySecs="0"' /tmp/c.xml | wc -l    # 27 (all bullets pages)
 grep -c 'xPersistProgress' /tmp/c.xml        # 1 (SCORM autosave script present on root)
 grep -oE 'unmarkForCompletion="true"' /tmp/c.xml | wc -l  # 1 (Welcome page)
+grep -oE 'name="Course complete"' /tmp/c.xml | wc -l  # 1 (final "Course complete" page after the final quiz)
 # build version: in a release export {{BUILD_VERSION}} is substituted; in source/preview it is the placeholder
 grep -oE 'Version:</strong> [^<&]*' /tmp/c.xml              # e.g. 'Version:</strong> v0.0.6 (...)'
 grep -c '{{BUILD_VERSION}}' /tmp/c.xml                     # 0 in a release export (1 in committed source)

@@ -13,8 +13,7 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
 
 - **Course license: CC BY-SA 4.0** (ShareAlike, required by the Agentic PDF).
 - Attribution + "changes were made" + "not endorsed by OWASP" on the About page.
-- **Provenance**: generated with the **pi coding-agent harness v0.79.8** using LLM (Large Language
-  Model) models **glm-5.2** and **kimi k2.7-coder**. Not endorsed by OWASP.
+- **Provenance**: generated with the assistance of an AI coding agent. Not endorsed by OWASP.
 - All prose is written in our own words as an adaptation; quiz questions are original.
 
 ## Conventions (apply on every page and in every quiz)
@@ -38,6 +37,8 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
 - **Scoring**: a **Configure Scores** page sets project scoring; theme quizzes (25%) + final quiz
   (75%) **all count** toward the LMS score. Final quiz pass mark **80%**.
 - **SCORM 1.2** export → `cmi.core.score.raw`, `cmi.core.lesson_status`, `cmi.interactions.n`.
+- **Option order**: every quiz question sets `answerOrder="random"` so the answer options
+  shuffle on each attempt (Nottingham per-question "Answer Order" property).
 - **Question types used** (all selection-based, no free text): Multiple Choice (single),
   Multiple Response (select all), True/False, Matching, Categorise.
 - Editor opened directly at `/edit.php?template_id=<id>`; **Publish** before export.
@@ -74,7 +75,7 @@ Real-world incident callout (where Appendix D has one) · Secure-coding mitigati
 - Attribution to both OWASP sources (name, author, source link, license link).
 - "Changes were made: this course is an adapted summary/derivative."
 - "Not endorsed by OWASP."
-- Provenance: pi v0.79.8, models glm-5.2 and kimi k2.7-coder.
+- Provenance: generated with the assistance of an AI coding agent.
 
 ### Page 3 — Introduction to secure code development  [Content]
 - What secure code development is; why it matters; cost of defects left vs right of the
@@ -128,7 +129,7 @@ Real-world incident callout (where Appendix D has one) · Secure-coding mitigati
   *An authenticated user edits a URL parameter to view another user's account* (correct).
   Distractors: an attacker sends a crafted SQL (Structured Query Language) string; a server uses
   a deprecated hash; an app ships with default admin credentials.
-- **Multiple response**: "Which are effective mitigations for authentication failures?" ✅ MFA
+- **Multiple response**: "Which are effective mitigations against authentication attacks?" ✅ MFA
   (Multi-Factor Authentication); ✅ hashed + salted passwords; ✅ lockout on repeated failures;
   ❌ plaintext password reminders by email; ❌ client-side authorization checks.
 - **True/False**: "A delegated agent should reuse the delegating user's full permissions when
@@ -157,8 +158,9 @@ Real-world incident callout (where Appendix D has one) · Secure-coding mitigati
   XPath (XML Path) injection, expression/language injection.
 - Examples: SQLi via concatenated strings, command injection, expression injection.
 - Mitigations: parameterised queries / prepared statements, allowlist input validation,
-  escaping/encoding, ORM (Object-Relational Mapping) safe APIs, least privilege on DB
-  (database) accounts.
+  escaping/encoding, parameterised ORM (Object-Relational Mapping) query methods (an ORM is
+  not inherently injection-proof — never concatenate raw input into its query strings), least
+  privilege on DB (database) accounts.
 
 ### Page 12 — Agent Goal Hijack (Agentic, ASI01)  [Content]
 - Overview: manipulating an agent's objectives, task selection, or decision pathways via prompt
@@ -560,6 +562,12 @@ All framed with full descriptive names (no item codes as the question subject).
   Memory & Context Poisoning = Agentic; Cryptographic Failures = Classic; Rogue Agents = Agentic;
   Security Misconfiguration = Classic; Cascading Failures = Agentic.
 
+### Page 44 — Course complete  [Content]
+- A closing page so it is unambiguous that the training is over: congratulates the learner,
+  reminds them their result is recorded by the LMS (Learning Management System) and that the
+  80% pass mark / last-attempt rule applies, and tells them they may close the window. Plain
+  Text page type.
+
 ### [Scores] — Configure Scores
 - Project scoring enabled; theme quizzes (25%) + final quiz (75%) all count; final pass mark
   80%; per-question weighting set at build time.
@@ -567,7 +575,7 @@ All framed with full descriptive names (no item codes as the question subject).
 ---
 
 ## Totals
-- 43 learner-visible pages + 1 Configure Scores page.
+- 44 learner-visible pages + 1 Configure Scores page.
 - 20 item pages (10 classic + 10 agentic), 7 theme intros, 7 theme quizzes, 1 final quiz,
   4 front-matter + 5 back-matter pages.
 - All quiz questions selection-based; auto-graded; LMS-reported via SCORM 1.2.
