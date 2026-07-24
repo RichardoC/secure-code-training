@@ -46,7 +46,7 @@ Glossary/abbreviations, References & further reading — all present.
 CC BY-SA 4.0 (Creative Commons Attribution-ShareAlike 4.0); both OWASP sources
 attributed (Agentic 2026 / genai.owasp.org / CC BY-SA 4.0; Top 10:2025 /
 owasp.org/Top10/2025/ / CC BY 3.0); "changes were made"; "not endorsed by OWASP";
-provenance (pi v0.79.8, models glm-5.2 and kimi k2.7-coder).
+provenance (generated with the assistance of an AI coding agent).
 
 ### Acronym expansions ✅ (sample all present)
 IDOR (Insecure Direct Object Reference), RCE (Remote Code Execution),
@@ -206,3 +206,75 @@ empty options, 27 `delaySecs=0`, autosave script present). A Publish
 round-trip preserved the `{{BUILD_VERSION}}` placeholder intact in
 `data.xml` (CKEditor does not mangle the braces). See `PROJECT_CONTEXT.md` §
 "Build version stamping" for full detail.
+
+## Feedback pass: option randomisation + content fixes (post-0.0.6)
+
+A round of review feedback was applied to `source/data.xml` +
+`source/preview.xml` (kept byte-identical). All changes are content-level and
+use engine-supported attributes, so they survive the release-workflow XOT
+import/export and the editor round-trip.
+
+1. **Option order randomised per attempt** ✅ — every `<question>` now carries
+   `answerOrder="random"` (45/45). Nottingham's HTML5 quiz model
+   (`models_html5/quiz.html` ~line 165) shuffles each question's options on
+   quiz load/restart; scoring is computed from the shuffled array, so SCORM
+   tracking is unaffected. This removes the previous bias where the correct
+   answer was frequently the first option (most visible in the final quiz).
+   `answerOrder` is a declared wizard property (`quiz.xwd` "Answer Order"),
+   so the editor round-trips it natively (like `trackingWeight`).
+2. **Theme 1 Quiz Q2 wording** ✅ — "Which are effective mitigations for
+   authentication failures?" → "Which are effective mitigations against
+   authentication attacks?" (clearer; the mitigations defend against attacks,
+   not "for" failures).
+3. **Injection (A05:2025) page — ORM bullet** ✅ — the line "Use safe ORM
+   (Object-Relational Mapping) APIs and stored procedures correctly." was
+   replaced with "Use parameterised query APIs and stored procedures
+   correctly; an ORM (Object-Relational Mapping) is not automatically safe —
+   use its parameterised methods and never concatenate raw input into
+   queries." An ORM is not inherently injection-proof, so it should not be
+   listed as a standalone mitigation.
+4. **Theme 7 Quiz Q2 — logging tool calls** ✅ — the correct answer was
+   inverted (False was marked correct, implying logging tool calls is *not*
+   recommended). Swapped so **True** is correct, matching the Theme 7 content
+   page ("You should log tool calls, inter-agent messages, goal state and
+   action sequences") and the final-quiz question that treats missing agent
+   logs as a Security Logging and Alerting Failure. We must be able to prove
+   what an agent did and why; privacy is handled by privacy-aware logging,
+   not by not logging.
+5. **Final quiz — over-scoped CRM tool question** ✅ — the question whose
+   correct answer was "Tool Misuse" (the over-scoped CRM summariser) was
+   reframed to ask for the *principle that prevents* the risk, with
+   "Scope each tool to least privilege: only the data and actions the task
+   requires" as the correct answer. (Over-scoped tools do map to Tool Misuse
+   / ASI02 per the course's own page, but the lesson the scenario teaches is
+   least-privilege scoping; the reframe makes that the answer.)
+6. **"Course complete" page added** ✅ — a new `<text>` page
+   (`linkID="PG1781901000001"`, name "Course complete") was added after the
+   final quiz so it is unambiguous that the training is over. It is a Plain
+   Text page (not Bullets), so the `delaySecs="0"` count is unchanged at 27.
+   Top-level page count is now 44 (43 learner content/quiz pages + this
+   closing page). Per the SCORM completion analysis in `PROJECT_CONTEXT.md`,
+   this page becomes the untracked last content node (no score, no
+   interaction — harmless), and the Final quiz's completion is now tracked.
+
+### Local checks (run against `source/data.xml`; XOT re-export still required per convention 9)
+
+- 45 `<question>` elements, 45 with `answerOrder="random"`.
+- 8 `<quiz>` nodes; `trackingWeight` = 1×7 + 21; `trackingMode="full"`;
+  `trackingPassed="80%"`; `judge="true"` ×8.
+- `unmarkForCompletion="true"` ×1 (Welcome); `xPersistProgress` ×1 (autosave
+  script); `{{BUILD_VERSION}}` ×1 (placeholder, substituted at build time).
+- `delaySecs="0"` ×27 (unchanged — the new page is Plain Text).
+- 0 empty option nodes; every question has ≥2 options and ≥1 correct.
+- `tools/render_preview.py` renders 44 pages (final page = "Course complete")
+  without error.
+- `source/data.xml` and `source/preview.xml` are byte-identical.
+
+**Pending (convention 9 — MANDATORY before merge)**: push the updated
+`source/data.xml` + `source/preview.xml` into a running XOT instance,
+confirm `play.php` returns 200, open the HTML5 editor to confirm a Publish
+round-trip preserves `answerOrder="random"` on all 45 questions (and the
+other tracking attrs), export a SCORM package, and grep the exported
+`template.xml` for the checklist values in `PROJECT_CONTEXT.md`. Then walk a
+quiz end-to-end (answer → Check → Next → complete → Restart) and confirm
+options reorder between attempts.
