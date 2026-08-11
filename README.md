@@ -41,9 +41,14 @@ secure-code-training/
 ├── COMMIT_MESSAGE.md         # suggested initial commit message (credits model + harness)
 ├── .github/workflows/
 │   ├── preview.yml           # on PR: renders a readable HTML preview for reviewers
+│   ├── test.yml              # on PR: builds the SCORM zip in XOT and runs the tracking tests
 │   └── release.yml           # on release: builds the SCORM zip and attaches it
 ├── tools/
-│   └── render_preview.py     # renders source/data.xml → preview/index.html
+│   ├── render_preview.py     # renders source/data.xml → preview/index.html
+│   └── sync_root_script.py   # compiles source/scorm_progress.js into data.xml/preview.xml
+├── tests/
+│   ├── build_scorm_package.sh# builds a SCORM zip from source/ using a real XOT container
+│   └── test_scorm_tracking.py# drives the exported package against a mock SCORM 1.2 LMS
 ├── docs/                     # all documentation
 │   ├── COURSE_SPEC.md        # the full page-by-page spec (source of truth for content)
 │   ├── COURSE_VERIFICATION.md# verification of the export against the spec
@@ -64,6 +69,12 @@ secure-code-training/
 - **`source/data.xml`** + **`source/preview.xml`** are the Xerte project
   content, for editing the course inside a running XOT instance and
   re-exporting (see [Edit & re-export](#edit-and-re-export-the-course)).
+- **`source/scorm_progress.js`** is the JavaScript that runs inside the package
+  to keep the LMS up to date as a learner works and to keep resume data sane.
+  It is the source of truth for the project's root `script` property; run
+  `python3 tools/sync_root_script.py` after editing it so `data.xml` and
+  `preview.xml` pick the change up. See
+  [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md#root-script-attribute-progress-autosave--resume-repair).
 
 ## Pull-request previews
 
@@ -188,6 +199,31 @@ These are binding on this derivative work — see
   or Bullets with `delaySecs="0"`).
 - **Incident callouts** must be self-contained for learners who haven't read the
   OWASP docs; incident references include hyperlinked sources.
+
+## Tests
+
+The tracking tests build the SCORM package from `source/data.xml` with a real
+XOT container (the same import/export path as the release workflow), then run
+the exported package in headless Chromium against a mock SCORM 1.2 LMS. They
+cover the things an LMS actually cares about: the course loads from any saved
+resume record, progress is committed as the learner goes, saved records stay
+resumable and inside the 4 KB `suspend_data` limit, quiz scores survive a
+resume, and a full 44-page walkthrough reports `passed` with a score of 100.
+
+```bash
+python3 -m pip install playwright && python3 -m playwright install chromium
+git clone --depth 1 -b docker-container \
+  https://github.com/RichardoC/xerteonlinetoolkits.git xote        # once
+
+python3 tools/sync_root_script.py --check                          # root script in sync
+tests/build_scorm_package.sh source/data.xml source/preview.xml out/course.zip
+python3 tests/test_scorm_tracking.py out/course.zip
+```
+
+Run them after any change to `source/scorm_progress.js`, the tracking
+attributes, the page order, or the quizzes. CI runs the same steps on every PR
+([test.yml](.github/workflows/test.yml)). `--test <substring>` runs a subset and
+`--headed` shows the browser.
 
 ## Verification
 
