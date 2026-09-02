@@ -26,6 +26,10 @@ with agents and building agents.
 | `course_backup/` | Backups: `Secure_code_development_scorm.zip`, `data.xml`, `preview.xml`. |
 | `.mcp.json` | MCP server config (Playwright MCP, `--browser firefox`). Not used for the fast path; see below. |
 | `~/.pi/agent/agents/xerte-author.md` | A pi subagent definition for authoring via `agent-browser` (model `accounts/fireworks/models/kimi-k2p7-code`). |
+| `source/scorm_progress.js` | **Source of truth** for the root `script` attribute (progress autosave + resume repair). Compile with `tools/sync_root_script.py` after editing. |
+| `tools/sync_root_script.py` | Compiles that file into `learningObject/@script` in `data.xml`/`preview.xml`; `--check` verifies they are in sync. |
+| `tests/build_scorm_package.sh` | Builds a SCORM zip from a `data.xml` using a real XOT container (same path as the release workflow). |
+| `tests/test_scorm_tracking.py` | Tracking tests: runs the exported package in headless Chromium against a mock SCORM 1.2 LMS. |
 
 ## Environment / access
 
@@ -218,7 +222,16 @@ rebuilds.
 a replacement fix — re-introducing the off-by-one will silently break LMS
 completion reporting again.
 
-## SCORM autosave on progress (root `script` attribute)
+## Root `script` attribute (progress autosave + resume repair)
+
+> **The JavaScript lives in [`source/scorm_progress.js`](../source/scorm_progress.js),
+> which is the source of truth.** It is compiled into the
+> `learningObject/@script` attribute of `source/data.xml` and
+> `source/preview.xml` by `python3 tools/sync_root_script.py`
+> (`--check` verifies the XML is up to date; the tracking tests assert it too).
+> Never hand-edit the attribute — ~400 lines of JavaScript on one XML line is
+> not reviewable, and the compiler also enforces the "no `<`, `>`, `&`, `"`"
+> rule that keeps the attribute round-tripping through the XOT editor unescaped.
 
 **Symptom**: on LMS, results (`cmi.core.score.raw`, `cmi.core.lesson_status`,
 interactions, `suspend_data`) were only reported to the LMS when the learner
@@ -260,6 +273,13 @@ x_params.script + '</script>')` (line 2269). The script:
 3. A 30 s `setInterval` heartbeat as a safety net (idle learners, or LMS
    viewers that unload without events), and a `pagehide` listener as a backup
    flush if `onbeforeunload` does not fire.
+4. Wraps `state.setVars` / `state.getVars` / `state.initTracking` to repair
+   `cmi.suspend_data` in both directions and to carry quiz page scores across
+   sessions — see "SCORM resume, completion and score tracking" below for why
+   each wrapper exists. The wrappers are installed at injection time, which is
+   **before** `XTInitialise()` calls `initTracking()` (xenith.js line 2267 vs
+   2275), which is the only reason a content-level script can fix a crash that
+   happens inside `initTracking`.
 
 **Why this is safe and durable**: it is content, so the release workflow
 exports it as part of `data.xml`/`template.xml` with no engine change. The
@@ -276,10 +296,117 @@ instead of `&&`), so it sits raw in the XML with no escaping concerns.
 
 **Do not remove or empty the root `script` attribute** without a replacement —
 re-introducing the terminate-only commit will silently revert to
-"results only on Save". If the engine is ever patched upstream to commit on
-`exitInteraction`, this `script` becomes redundant (harmless — its `persist()`
-would just call `doLMSCommit` a second time, which is idempotent) and can be
-dropped.
+"results only on Save", and re-introduces the start-up crash below. If the
+engine is ever patched upstream to commit on `exitInteraction`, the autosave
+half becomes redundant (harmless — its `persist()` would just call
+`doLMSCommit` a second time, which is idempotent); the resume-repair half stays
+relevant until the engine's own `getVars()`/`setVars()` are fixed upstream.
+
+## SCORM resume, completion and score tracking
+
+Four problems were reported from a real LMS attempt. All four are behaviours of
+`modules/xerte/scorm1.2/xttracking_scorm1.2.js`, which we cannot patch (the
+release workflow rebuilds the engine from upstream XOT), so they are worked
+around from the root `script` attribute. Each one has a test in
+`tests/test_scorm_tracking.py` that fails without the fix.
+
+### 1. Course fails to load — `Cannot read properties of null (reading 'page_nr')`
+
+`getVars()` serialises the resume point as
+
+```js
+var sit = this.find(this.currentpageid);
+jsonObj.interactions.push(sit);          // sit is null if currentpageid is ''
+```
+
+and `find()` returns `null` for a blank id. `currentpageid` **is** blank in two
+ordinary situations:
+
+- between leaving one page and entering the next — `exitInteraction()` sets
+  `this.currentpageid = ""` when `ia_nr < 0` (i.e. on every `XTExitPage`), and
+  the next `XTEnterPage` sets it again. Our autosave used to flush inside
+  exactly that window, so it persisted `"interactions":[null]`;
+- on a *revisit* to the built-in table of contents, where the engine skips
+  `XTEnterPage` (xenith.js line ~3183) and `x_endPageTracking` skips
+  `XTExitPage`, so a Save Session / unload on the contents page makes the
+  engine's own `finishTracking()` write the same null.
+
+On the next launch, `setVars()` reads `jsonSit.page_nr` off that `null` and
+throws from inside `initTracking()` / `XTInitialise()`. The exception unwinds
+`x_continueSetUp2`, so the player never renders a page at all — the learner sees
+a blank course, which is exactly what was reported.
+
+**Fix**: `state.getVars` is wrapped so an unresumable record is never written —
+nulls are dropped, and if `currentpageid` does not resolve, the wrapper
+substitutes the page currently on screen (or the most recent page in
+`x_pageHistory`) and includes that interaction. `state.setVars` is wrapped so a
+record written by an older build is healed on the way in, and
+`state.initTracking` is wrapped so that even an unforeseen bad record costs the
+learner their resume point, not the whole course.
+
+### 2. Inconsistent saved-progress data (blank resume point, 43 vs 45)
+
+Two separate things:
+
+- The **blank resume point** (`currentid` / `currentpageid` empty) is the same
+  root cause as (1) and is fixed by the same wrapper.
+- **43 `completedPages` against 45 declared pages is correct, not a mismatch.**
+  `nrpages` is `x_pageInfo.length` = 44 content pages **+ 1** for the
+  table-of-contents page Xerte splices in at `x_pages[0]`. `completedPages` is
+  sized from `markedPages`, which excludes the contents page and the Welcome
+  page (`unmarkForCompletion="true"`, see the section above), giving
+  43 = pages `page_nr` 1…43, i.e. Welcome through the final quiz. The
+  "Course complete" page (`page_nr` 44) is deliberately not required.
+
+What *is* a real bug is that `setVars()` restores `completedPages` verbatim, so
+a learner who resumes into a build with a different number of tracked pages
+keeps an array of the wrong length, and `getSuccessStatus()` walks that array:
+a short array reports completion early, a long one blocks completion forever.
+The wrapper now resizes `completedPages` to `state.toCompletePages.length`
+(truncate extras, pad with `false`) and prefers the live `nrpages`,
+`trackingmode`, `scoremode`, `page_timeout` and pass mark over the saved copies,
+because the running package knows those better than the record does. Saved
+`pagesViewed` / `pageHistory` entries that no longer exist are dropped, which
+also removes a second crash path (`x_restorePagesViewed` writes
+`x_pageInfo[i].viewed` without a bounds check).
+
+### 3. Completion reachability with `trackingMode="full"`
+
+Verified end to end rather than assumed: `test_full_walkthrough_reports_passed`
+walks all 44 pages, answers all 45 questions, and asserts
+`cmi.core.lesson_status="passed"` with `cmi.core.score.raw=100`;
+`test_completion_survives_a_resume` does the same across two sessions.
+
+For the record, "all pages required" is weaker than it sounds: a page counts as
+complete when it is *left* after more than 100 ms (`exit()` ignores shorter
+visits) and all of its interactions exist. A quiz page registers all of its
+question interactions when the page loads, so visiting a quiz page is enough for
+*completion*; answering is what produces the *score*. The pass mark
+(`trackingPassed="80%"`) is applied to the weighted score only after all 43
+marked pages are complete. The practical risk was never the page count — it was
+(1) the crash and (2) the stale `completedPages` array, both fixed above.
+
+### 4. Score not captured (`score.raw` 0 with interactions logged)
+
+`getVars()` deliberately persists only the current page's interaction ("SCORM
+1.2 only allows for 4kb of suspend data"), and `getdRawScore()` computes the
+grade as a weighted average over the page interactions currently in memory. So
+**every quiz page score is thrown away when a learner resumes**: a learner who
+does theme quizzes on Monday and the final quiz on Tuesday gets a grade based on
+Tuesday alone, and a learner who answers questions without finishing a quiz page
+(no `XTSetPageScore` until the results screen) reports `score.raw=0` even though
+`cmi.interactions.*` is full of answers. That is the reported combination of
+"lesson_status incomplete, score.raw 0, interactions logged".
+
+**Fix**: the `getVars` wrapper adds a compact `xtPages` list —
+`[page_nr, score, weighting, nrinteractions, id]` per scored page — and the
+`setVars` wrapper turns it back into page interactions, so `getdRawScore()` sees
+the earlier quizzes again. A size guard keeps the record inside the SCORM 1.2
+4096-character `suspend_data` limit by shedding, in order: old `pageHistory`
+entries, `pageHistory`, `pagesViewed`, then `xtPages` (the tests assert the
+limit is respected). Because `scoremode` is `last`, re-taking a quiz still
+overwrites the remembered score, and a page never counted twice
+(`findPage()` matches the first page-level entry per `page_nr`).
 
 ## Build version stamping (`{{BUILD_VERSION}}` placeholder)
 
@@ -379,6 +506,18 @@ package fire `LMSFinish` for the grade to post.
      `trackingPassed="80%"`, question count (45), and empty-option count (0).
    - If `play.php` is not 200 or the export is missing tracking attrs, the
      `data.xml` is not valid for XOT — do not merge.
+   - **Tracking tests (MANDATORY if you touched `scorm_progress.js`, tracking
+     attributes, page order or quizzes):**
+     ```bash
+     python3 tools/sync_root_script.py --check
+     git clone --depth 1 -b docker-container \
+       https://github.com/RichardoC/xerteonlinetoolkits.git xote   # once
+     tests/build_scorm_package.sh source/data.xml source/preview.xml out/course.zip
+     python3 tests/test_scorm_tracking.py out/course.zip           # all must pass
+     ```
+     These build the package in a throwaway XOT container and drive the real
+     exported package in headless Chromium against a mock SCORM 1.2 LMS. CI runs
+     the same thing on every PR (`.github/workflows/test.yml`).
 7. **Re-export SCORM** (needs guest cookie — see guide §7) and update
    `course_backup/` (`cp` the zip + `docker exec xerte cat data.xml > course_backup/data.xml` + same for preview.xml).
 8. Update `COURSE_VERIFICATION.md` if the change affects conformance.
@@ -423,6 +562,7 @@ grep -oE 'trackingWeight="[0-9]+"' /tmp/c.xml   # 7x "1" + 1x "21"
 grep -oE 'trackingMode="[a-z_]+"' /tmp/c.xml   # "full"
 grep -oE 'delaySecs="0"' /tmp/c.xml | wc -l    # 27 (all bullets pages)
 grep -c 'xPersistProgress' /tmp/c.xml        # 1 (SCORM autosave script present on root)
+grep -c '__xtProgress' /tmp/c.xml            # 1 (resume-repair wrappers present on root)
 grep -oE 'unmarkForCompletion="true"' /tmp/c.xml | wc -l  # 1 (Welcome page)
 grep -oE 'name="Course complete"' /tmp/c.xml | wc -l  # 1 (final "Course complete" page after the final quiz)
 # build version: in a release export {{BUILD_VERSION}} is substituted; in source/preview it is the placeholder
@@ -432,6 +572,9 @@ unzip -p Secure_code_development_scorm.zip VERSION.txt     # present in release 
 # empty options (must be 0):
 python3 -c "import re,html as H;x=open('/tmp/c.xml').read();print(sum(1 for m in re.finditer(r'<option ([^>]*?)/>',x) if H.unescape(H.unescape(re.search(r'text=\"([^\"]*)\"',m.group(1)).group(1)).replace('<p>','').replace('</p>','').strip())==''))"
 curl -s -o /dev/null -w "play=%{http_code}\n" http://localhost:8088/play.php?template_id=1   # 200
+# root script is the compiled source, and tracking still behaves:
+python3 tools/sync_root_script.py --check
+python3 tests/test_scorm_tracking.py Secure_code_development_scorm.zip   # all pass
 ```
 Then open `play.php` in a browser, walk a theme quiz and the final quiz
 end-to-end (answer → Check → Next → complete → Restart) to confirm the UI works.

@@ -1,0 +1,55 @@
+name: SCORM tracking tests
+
+# Builds the SCORM package from source/data.xml with a real XOT container (the
+# same import/export path as the release workflow) and runs the tracking tests
+# against it in headless Chromium with a mock SCORM 1.2 LMS.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  scorm-tracking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout this repo (course source)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Checkout XOT (docker-container branch) for the Dockerfile
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: RichardoC/xerteonlinetoolkits
+          ref: docker-container
+          path: xote
+
+      - name: Check the root script attribute matches source/scorm_progress.js
+        run: python3 tools/sync_root_script.py --check
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Playwright
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: Build the SCORM package from source/
+        run: |
+          tests/build_scorm_package.sh source/data.xml source/preview.xml out/course.zip
+
+      - name: Run the tracking tests
+        run: python3 tests/test_scorm_tracking.py out/course.zip
+
+      - name: Upload the package under test on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: course-under-test
+          path: out/course.zip
+          retention-days: 7

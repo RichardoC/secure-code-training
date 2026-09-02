@@ -7,12 +7,18 @@ Thumbs.db
 # Temp / scratch
 *.tmp
 /tmp/
+__pycache__/
+*.pyc
 
 # Generated outputs — never commit these; they are built by CI
 scorm/
 Secure_code_development_scorm.zip
 preview/
+out/
 .playwright-mcp/
+
+# XOT checkout used by tests/build_scorm_package.sh
+xote/
 
 # Local XOT state (if anyone runs XOT inside this repo by mistake)
 USER-FILES/
