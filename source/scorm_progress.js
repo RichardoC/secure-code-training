@@ -14,7 +14,7 @@
  * set earlier still, in x_projectDataLoaded, this script can see both the live
  * page structure and the LMS suspend data before the engine parses it.
  *
- * It works around three behaviours of modules/xerte/scorm1.2/
+ * It works around four behaviours of modules/xerte/scorm1.2/
  * xttracking_scorm1.2.js that we cannot patch, because the release workflow
  * rebuilds the engine from upstream XOT on every build:
  *
@@ -29,7 +29,10 @@
  *     initTracking / XTInitialise, which stops the course from rendering at
  *     all. We repair records on the way out (never write an unresumable
  *     record) and on the way in (heal records written by an older build), and
- *     we make initTracking non-fatal as a backstop.
+ *     we make initTracking non-fatal as a backstop. A resume point naming a
+ *     page this build does not have blanks the course the same way, one step
+ *     later: XTStartPage hands page_nr to the player, which indexes
+ *     x_pageInfo without a bounds check, so those entries are dropped too.
  *
  *  2. completedPages is restored verbatim from the saved record, so a learner
  *     who resumes into a build with a different number of tracked pages keeps
@@ -46,6 +49,12 @@
  *     compact per-quiz-page score list (xtPages) and restore it as page
  *     interactions, with a size guard so the record stays inside the 4096
  *     character suspend_data limit.
+ *
+ *  4. state.finished is never set by the engine, so the guard against saving
+ *     after LMSFinish does not work: onbeforeunload runs XTTerminate, and the
+ *     later pagehide would autosave again, which a conformant LMS rejects and
+ *     which loses a page-history entry finishTracking has already dropped. We
+ *     track termination ourselves.
  *
  * It also keeps the original job of this script: committing progress to the
  * LMS as the learner goes, because the engine only calls doLMSCommit() from
@@ -81,6 +90,11 @@
         var n = Number(v);
         if (isNaN(n)) { return 0; }
         return Math.round(n * 100) / 100;
+    }
+
+    function pagesKnown() {
+        if (typeof x_pageInfo === 'undefined') { return false; }
+        return isArray(x_pageInfo);
     }
 
     /* Is this page index part of the package we are running right now? */
@@ -152,6 +166,9 @@
         if (isArray(list)) {
             list.forEach(function (it) {
                 if (!usable(it)) { return; }
+                if (pagesKnown()) {
+                    if (!livePage(it.page_nr)) { return; }
+                }
                 if (isPageEntry(it)) {
                     if (pages.indexOf(it.page_nr) !== -1) { return; }
                     pages.push(it.page_nr);
@@ -263,6 +280,13 @@
         return sit;
     }
 
+    /* a copy, so live engine state is never touched */
+    function asExited(entry) {
+        var copy = JSON.parse(JSON.stringify(entry));
+        copy.state = 'exited';
+        return copy;
+    }
+
     function quizScoreRows(st) {
         var rows = [];
         if (!isArray(st.interactions)) { return rows; }
@@ -308,7 +332,10 @@
                 if (pageNrsOf(kept).indexOf(sit.page_nr) === -1) { kept.push(sit); }
             }
         }
-        obj.interactions = kept;
+        obj.interactions = kept.map(function (it) {
+            if (it.id === obj.currentpageid) { return asExited(it); }
+            return it;
+        });
         obj.completedPages = normaliseCompleted(obj.completedPages);
         obj.pageHistory = livePages(obj.pageHistory);
         obj.pagesViewed = livePages(obj.pagesViewed);
@@ -317,8 +344,11 @@
 
     /* ---- autosave ---- */
 
+    var terminated = false;
+
     function persist() {
         try {
+            if (terminated) { return; }
             if (typeof state === 'undefined') { return; }
             if (!state) { return; }
             if (!state.initialised) { return; }
@@ -387,6 +417,18 @@
         }
     }
 
+    /* Must be wrapped synchronously: xenith assigns window.onbeforeunload =
+       XTTerminate just after injecting this script, and would otherwise capture
+       the unwrapped function. */
+    function wrapTerminate() {
+        if (typeof window.XTTerminate !== 'function') { return; }
+        var orig = window.XTTerminate;
+        window.XTTerminate = function () {
+            terminated = true;
+            return orig.apply(this, arguments);
+        };
+    }
+
     function wrapGlobal(name) {
         if (typeof window[name] !== 'function') { return; }
         var orig = window[name];
@@ -421,6 +463,7 @@
 
     /* must happen before XTInitialise calls initTracking */
     wrapState();
+    wrapTerminate();
     if (typeof window.addEventListener === 'function') {
         window.addEventListener('pagehide', persist);
     }

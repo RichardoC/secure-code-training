@@ -58,7 +58,7 @@ MOCK_API = """
     var store = %s;
     var lms = {
         log: [], suspends: [], commits: 0, initialised: false, finished: false,
-        alerts: []
+        afterFinish: [], alerts: []
     };
     var maxInteraction = -1;
     window.__lms = lms;
@@ -75,6 +75,7 @@ MOCK_API = """
         LMSSetValue: function (key, value) {
             store[key] = String(value);
             lms.log.push([key, String(value)]);
+            if (lms.finished) { lms.afterFinish.push(key); }
             var m = /^cmi\\.interactions\\.(\\d+)\\./.exec(key);
             if (m) { maxInteraction = Math.max(maxInteraction, Number(m[1])); }
             if (key === 'cmi.suspend_data') { lms.suspends.push(String(value)); }
@@ -464,9 +465,8 @@ def test_loads_with_corrupt_resume_record(h: Harness):
         )
         assert not s.page_errors, f"page errors: {s.page_errors}"
         text = s.visible_text()
-        assert "Welcome to Secure code development" in text or len(text) > 200, (
-            "the course did not render any content"
-        )
+        assert "Secure code development" in text, "the course title did not render"
+        assert len(text) > 200, f"the course rendered almost nothing: {len(text)} characters"
         assert len(s.completed_pages()) == TRACKED_PAGES, (
             "completed pages were lost while healing the record"
         )
@@ -530,6 +530,85 @@ def test_out_of_range_pages_viewed_is_dropped(h: Harness):
 
 
 @test
+def test_resume_point_from_a_removed_page_is_dropped(h: Harness):
+    """A record naming a page index this build does not have must still load.
+
+    The same blank course as a null interaction, one step later: XTStartPage
+    hands the saved page_nr to the player, which indexes x_pageInfo without a
+    bounds check. This is what a learner sees when pages are removed from the
+    course between their attempts.
+    """
+    with h.session() as s:
+        s.open()
+        s.goto(3)
+        s.terminate()
+        record = json.loads(s.cmi("cmi.suspend_data"))
+
+    entry = record["interactions"][0]
+    entry["page_nr"] = 60
+    entry["page_ref"] = 61
+    entry["id"] = "urn:x-xerte:p-61:A_page_from_an_older_build"
+    record["currentpageid"] = entry["id"]
+    with h.resumed(json.dumps(record)) as s:
+        s.open()
+        assert not s.page_errors, f"start-up threw on a stale resume point: {s.page_errors}"
+        assert s.current_page() == MENU_PAGE, (
+            f"expected to fall back to the contents page, got {s.current_page()}"
+        )
+        assert len(s.completed_pages()) == TRACKED_PAGES, "progress was lost"
+
+
+@test
+def test_nothing_is_saved_after_lms_finish(h: Harness):
+    """Once the SCO has called LMSFinish, the autosave must stay quiet.
+
+    The engine never sets state.finished, so the guard on it does nothing:
+    onbeforeunload runs XTTerminate and the later pagehide autosaved again,
+    which a conformant LMS rejects with error 301.
+    """
+    with h.session() as s:
+        s.open()
+        s.goto(2)
+        s.terminate()
+        assert s.lms("window.__lms.finished") is True, "LMSFinish was not called"
+        # the browser fires pagehide after onbeforeunload; the heartbeat can also land
+        s.sco.evaluate("() => window.dispatchEvent(new Event('pagehide'))")
+        s.sco.evaluate("() => window.xPersistProgress()")
+        s.page.wait_for_timeout(200)
+        late = s.lms("window.__lms.afterFinish")
+        assert late == [], f"wrote to the LMS after LMSFinish: {late}"
+
+
+@test
+def test_mid_page_save_records_the_page_as_exited(h: Harness):
+    """A save taken mid-page must persist the resume entry as exited.
+
+    finishTracking's own records do. The engine only calls reenter() for an
+    'exited' interaction, so a record saved as 'entered' kept its old start
+    timestamp and the next session's first page exit reported a duration
+    spanning the gap between sessions.
+    """
+    with h.session() as s:
+        s.open()
+        s.goto(5)
+        s.sco.evaluate("() => window.xPersistProgress()")
+        raw = s.cmi("cmi.suspend_data")
+        record = json.loads(raw)
+        entry = next(i for i in record["interactions"] if i["id"] == record["currentpageid"])
+        assert entry["state"] == "exited", (
+            f"resume entry was saved as {entry['state']!r}, so the next session's "
+            "first page exit would report a duration spanning the gap"
+        )
+        assert s.sco.evaluate("() => state.find(state.currentpageid).state") == "entered", (
+            "the live interaction was mutated; only the saved copy may differ"
+        )
+
+    with h.resumed(raw) as s:
+        s.open()
+        assert s.current_page() == 5, f"expected to resume on page 5, got {s.current_page()}"
+
+
+@test
 def test_stale_completed_pages_are_resized(h: Harness):
     """completedPages from a different build must be resized, not trusted.
 
@@ -539,7 +618,10 @@ def test_stale_completed_pages_are_resized(h: Harness):
     """
     with h.session() as s:
         s.open()
-        s.goto(3)
+        # answer a quiz so the record is 'interactive' and its status is meaningful
+        s.goto(THEME1_QUIZ)
+        s.answer_quiz()
+        s.goto(THEME1_QUIZ + 1)
         s.terminate()
         genuine = s.cmi("cmi.suspend_data")
 
@@ -562,6 +644,9 @@ def test_stale_completed_pages_are_resized(h: Harness):
         assert len(s.completed_pages()) == TRACKED_PAGES, (
             f"a 60-entry completedPages was not resized to {TRACKED_PAGES}: "
             f"{len(s.completed_pages())}"
+        )
+        assert s.status() != "incomplete", (
+            "an over-long completedPages array blocked completion"
         )
 
 
