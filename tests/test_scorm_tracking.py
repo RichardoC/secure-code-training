@@ -566,6 +566,51 @@ def test_stale_completed_pages_are_resized(h: Harness):
 
 
 @test
+def test_oversized_progress_is_trimmed_not_broken(h: Harness):
+    """A record that would not fit sheds page history, never scores or completion.
+
+    cmi.suspend_data is capped at 4096 characters in SCORM 1.2, and page history
+    grows with every page a learner visits. When the record would not fit, the
+    oldest history goes first; the resume point, completion and quiz scores stay.
+    """
+    with h.session() as s:
+        s.open()
+        for page_nr in QUIZ_PAGES:
+            s.goto(page_nr, dwell=160)
+            s.answer_quiz()
+        s.goto(20, dwell=160)
+        # a learner who has wandered far more than the record could ever hold
+        s.sco.evaluate(
+            "n => { x_pageHistory = [];"
+            " for (var i = 0; i < n; i++) { x_pageHistory.push(1 + (i % 44)); } }",
+            5000,
+        )
+        s.sco.evaluate("() => window.xPersistProgress()")
+        raw = s.cmi("cmi.suspend_data")
+        assert len(raw) <= SUSPEND_LIMIT, (
+            f"suspend_data is {len(raw)} characters, over the SCORM 1.2 "
+            f"{SUSPEND_LIMIT} character limit"
+        )
+        record = json.loads(raw)
+        assert_resumable(record, "trimmed record")
+        assert len(record["completedPages"]) == TRACKED_PAGES, "completion was shed"
+        remembered = {row[0] for row in record.get("xtPages", [])}
+        assert remembered == set(QUIZ_PAGES), (
+            f"quiz scores were shed before page history: kept {sorted(remembered)}"
+        )
+        assert len(record.get("pageHistory", [])) <= 20, (
+            f"page history was not trimmed: {len(record.get('pageHistory', []))} entries"
+        )
+
+    with h.resumed(raw) as s:
+        s.open()
+        assert not s.page_errors, f"the trimmed record did not resume: {s.page_errors}"
+        assert s.raw_score() == 100, (
+            f"score after resuming from the trimmed record is {s.raw_score()}, expected 100"
+        )
+
+
+@test
 def test_resume_returns_to_the_saved_page(h: Harness):
     """A normal save/resume cycle puts the learner back where they were."""
     with h.session() as s:
