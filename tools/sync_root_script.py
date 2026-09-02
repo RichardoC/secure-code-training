@@ -43,9 +43,19 @@ def compile_script(js: str) -> str:
     return js
 
 
-def check_compiled(compiled: str) -> list[str]:
+def check_compiled(compiled: str, source: str = "") -> list[str]:
     """Return a list of problems with the compiled one-liner."""
     problems = []
+    # Comment stripping is naive: a /* or */ that appears inside a string
+    # literal would silently delete everything up to the next one, and
+    # `node --check` would still accept the result. Every function the source
+    # defines must survive into the output.
+    for name in re.findall(r"\bfunction\s+(\w+)\s*\(", source):
+        if f"function {name}(" not in compiled:
+            problems.append(
+                f"function {name}() disappeared during compilation - a comment "
+                "marker inside a string literal can silently delete code"
+            )
     for char in FORBIDDEN:
         if char in compiled:
             problems.append(
@@ -90,8 +100,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    compiled = compile_script(SOURCE.read_text(encoding="utf-8"))
-    problems = check_compiled(compiled)
+    source = SOURCE.read_text(encoding="utf-8")
+    compiled = compile_script(source)
+    problems = check_compiled(compiled, source)
     if problems:
         for problem in problems:
             print(f"ERROR: {problem}", file=sys.stderr)
