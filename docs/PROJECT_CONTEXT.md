@@ -408,6 +408,78 @@ limit is respected). Because `scoremode` is `last`, re-taking a quiz still
 overwrites the remembered score, and a page never counted twice
 (`findPage()` matches the first page-level entry per `page_nr`).
 
+## Learner-facing progress (status panel, honest quiz ticks, progress bar)
+
+**Symptom**: learners could not tell how far through the course they were or
+whether they had done what completion requires. Two things misled them:
+
+- the contents-page **tick means "opened"**, nothing more. `x_pageLoaded()`
+  sets `x_pageInfo[i].viewed = true` the moment a page finishes loading and
+  `XENITH.PAGEMENU.tickViewed()` removes the `notvisited` class from any viewed
+  page; tracking never feeds into it, so a quiz ticks before a single question
+  is answered;
+- the **LMS shows 0% until the very end**. SCORM 1.2 has no progress field.
+  `getSuccessStatus()` returns `incomplete` until every one of the 43 tracked
+  pages has been *left* (after more than 100 ms), then `passed`/`failed`
+  against the pass mark. Moodle's default SCORM grading method, "Learning
+  objects", counts SCOs whose status is completed/passed, and this package is
+  one SCO, so the grade is 0 then 1. See "Moodle settings" in the README.
+
+The LMS side is structural (see the README for why SCORM 2004 and multi-SCO
+were rejected), so the fix is to make the course itself honest. Three parts,
+all content-level (no engine patch):
+
+1. **Status panel** (`source/scorm_progress.js`, part 5). Every element with
+   the class `xtStatusPanel` is filled with: required pages completed
+   (`state.completedPages` against `state.toCompletePages`), the names of the
+   pages still to visit (capped at 6), each quiz page's result or "not yet
+   submitted", the weighted score so far against `state.lo_passed`, and the
+   exact status `state.getSuccessStatus()` would report to the LMS, in plain
+   language. Two placeholders exist: the root `menuText` attribute (shown in
+   the text column of the contents page) and a `<div>` at the top of the
+   **Course complete** page. The panel is refreshed from `x_pageLoaded`,
+   `XENITH.PAGEMENU.tickViewed`, `XTExitPage`, `XTExitInteraction` and
+   `XTSetPageScore` (all wrapped). Outside an LMS it says tracking is not
+   active. `window.xtRefreshProgressUi()` re-renders it on demand.
+2. **Quiz ticks mean "submitted"**. The engine never reads the page-level
+   interaction's `complete` field, so the `XTSetPageScore` wrapper (the quiz
+   results screen is its only caller) sets it to `true`, and it is persisted as
+   a sixth element of each `xtPages` row (`1`/`0`) and restored by `setVars`.
+   Records written before the flag existed have no `row[5]`; a non-zero score
+   can only come from the results screen, so it is treated as submitted. After
+   `tickViewed`, the tick of a quiz page that is viewed but not submitted is
+   swapped for `fa-adjust` (a half-filled circle) with the class `xtPending`
+   and the label "Opened, quiz not yet submitted"; it reverts on submission.
+3. **Header progress bar** (Xerte's own, editor-supported): root attributes
+   `progressBarType="header2"` ("below titles"; `header1`, "above titles",
+   is inserted after the header logo icon, and this course has no logo, so
+   jQuery's `insertAfter` on an empty set silently builds nothing),
+   `progressSub="milestones"`,
+   `progressBarPercentage="true"`, `progressBarTxt="{x}% of pages viewed"`,
+   `progressBarSubLink="true"`, plus `milestone="true"` on each of the 8 quiz
+   pages. It is viewed-based like the ticks, hence the label wording.
+
+The Welcome page explains the three indicators; the Course complete page no
+longer claims the result "has been recorded" unconditionally and points at the
+panel instead.
+
+**Deliberately not changed**: what "required" means. All 43 tracked pages
+(Welcome through the final quiz) still count, including About, Mapping,
+Glossary and References. Exempting a page needs care: because of the
+off-by-one described under "SCORM completion bug fix", `unmarkForCompletion`
+on page *N* actually exempts page *N-1*; the clean route is for the root script
+to rebuild `state.toCompletePages` from the live page list before
+`XTInitialise`, and the tests' `TRACKED_PAGES` would follow. Also unchanged:
+the engine's pass check is `getdScaledScore() > lo_passed / 100`, strictly
+greater, so a score of exactly 80% reports `failed` (Moodle applies no mastery
+override because the Xerte manifest declares no `adlcp:masteryscore`).
+
+Tests: `test_status_panel_tells_the_learner_what_is_left`,
+`test_quiz_tick_means_submitted_not_opened`,
+`test_older_records_infer_submission_from_the_score`,
+`test_header_progress_bar_counts_viewed_pages`, and the panel assertions at the
+end of `test_full_walkthrough_reports_passed`.
+
 ## Build version stamping (`{{BUILD_VERSION}}` placeholder)
 
 So an operator can tell **which version is running** in an LMS, the SCORM

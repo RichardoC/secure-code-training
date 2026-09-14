@@ -200,6 +200,45 @@ These are binding on this derivative work — see
 - **Incident callouts** must be self-contained for learners who haven't read the
   OWASP docs; incident references include hyperlinked sources.
 
+## Progress and completion: what learners and the LMS see
+
+- **In the course**: a header progress bar (percentage of pages opened, with a
+  marker per quiz), contents-page ticks that mean *opened* for content pages
+  and *submitted* for quizzes (an opened-but-unsubmitted quiz shows a
+  half-filled circle), and a **Your progress** panel on the contents page and
+  the Course complete page that lists the required pages still to visit, each
+  quiz result, the weighted score, and the exact status the LMS holds. See
+  [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md#learner-facing-progress-status-panel-honest-quiz-ticks-progress-bar).
+- **In the LMS**: SCORM 1.2 carries no progress figure, only
+  `cmi.core.lesson_status`. The course reports `incomplete` until every
+  required page (Welcome through the final quiz) has been visited, then
+  `passed` or `failed` against the 80% mark. Status and score are committed as
+  the learner goes, so the flip is visible as soon as it happens, but nothing
+  in between can move an LMS percentage.
+
+### Moodle settings
+
+If your LMS is Moodle (the one this course was first deployed to), three
+settings on the SCORM activity matter:
+
+| Setting | Recommended | Why |
+| --- | --- | --- |
+| **Grading method** | Learning objects (the default) | Grades by counting SCOs whose status is completed/passed. This package is one SCO, so the grade is 0% until the learner passes, then 100%. That is the "0% until the end" learners see, and it is honest. "Highest grade" / "Average grade" would show the running quiz score instead, which reads as 100% after one perfect quiz with 40 pages still to go. |
+| **Completion tracking** | Require status: *Passed* (optionally a minimum score) | Makes Moodle's activity completion mean the same thing as the course's own pass logic. Do not use "view" or "grade" alone. |
+| **Display attempt status** | Dashboard and entry page | Lets learners see the status and grade Moodle holds without opening the course. |
+
+Moodle applies no mastery-score override here (the Xerte manifest declares no
+`adlcp:masteryscore`), so the status the course sends is the status Moodle
+stores. Administrators can see live per-question progress under the activity's
+**Reports → Interactions report** and **Track details**, because the course
+commits after every page and every answered question.
+
+Two things that do **not** help with Moodle: exporting as SCORM 2004 (Moodle
+stores `cmi.progress_measure` but never displays it as progress, and Xerte's
+2004 tracker does not set it anyway) and splitting the course into one SCO per
+theme (the only way to get a Moodle-native partial grade, at the cost of eight
+Xerte projects, a hand-built manifest and no shared final score).
+
 ## Tests
 
 The tracking tests build the SCORM package from `source/data.xml` with a real
