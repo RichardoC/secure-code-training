@@ -356,6 +356,34 @@ def parse_suspends(raw: list[str]) -> list[dict]:
     return out
 
 
+def panel_text(s: Session, page_nr: int) -> str:
+    """The 'Your progress' panel rendered on the given (already built) page."""
+    return s.sco.inner_text(f"#x_page{page_nr} .xtStatusPanel")
+
+
+def lms_status_shown(s: Session, page_nr: int) -> str:
+    return s.sco.get_attribute(f"#x_page{page_nr} .xtLmsStatus", "data-status")
+
+
+PENDING_QUIZ_TICKS = """
+() => {
+    const out = [];
+    const offset = XENITH.PAGEMENU.menuPage ? 1 : 0;
+    window.jQuery('#x_page0 .menuItem').each(function () {
+        if (window.jQuery(this).find('i.xtPending').length) {
+            out.push(x_normalPages[window.jQuery(this).data('pageIndex') + offset]);
+        }
+    });
+    return out;
+}
+"""
+
+
+def pending_quiz_ticks(s: Session) -> list[int]:
+    """Page indexes whose contents-page tick is the 'quiz not yet submitted' marker."""
+    return s.sco.evaluate(PENDING_QUIZ_TICKS)
+
+
 def assert_resumable(record: dict, where: str) -> None:
     interactions = record.get("interactions")
     assert isinstance(interactions, list), f"{where}: interactions is not a list"
@@ -395,6 +423,14 @@ def test_package_sanity(h: Harness):
     )
     assert 'unmarkForCompletion="true"' in template, "Welcome page is no longer unmarked"
     assert "xPersistProgress" in template, "root progress script is missing"
+    assert 'progressBarType="header2"' in template, "header progress bar is not enabled"
+    assert template.count('milestone="true"') == len(QUIZ_PAGES), (
+        "every quiz page should be a progress-bar milestone"
+    )
+    assert template.count("xtStatusPanel") >= 3, (
+        "expected the status panel placeholder in the menu text, on the Course "
+        "complete page and in the script"
+    )
     compiled = (ROOT / "source" / "scorm_progress.js")
     if compiled.exists():
         # the attribute in the package must be the compiled source, not a hand-edit
@@ -821,6 +857,12 @@ def test_full_walkthrough_reports_passed(h: Harness):
         )
         assert s.status() == "passed", f"lesson status is {s.status()!r}, expected 'passed'"
         assert s.raw_score() == 100, f"score.raw is {s.raw_score()}, expected 100"
+        # the Course complete page reports the same thing the LMS was told
+        shown = panel_text(s, LAST_CONTENT_PAGE)
+        assert f"Required pages completed: {TRACKED_PAGES} of {TRACKED_PAGES}" in shown, shown
+        assert "LMS status: Passed" in shown, shown
+        assert lms_status_shown(s, LAST_CONTENT_PAGE) == "passed"
+        assert "not yet submitted" not in shown, shown
         s.terminate()
         assert s.cmi("cmi.core.lesson_status") == "passed", (
             f"the LMS was told lesson_status={s.cmi('cmi.core.lesson_status')!r}"
@@ -877,6 +919,106 @@ def test_completion_survives_a_resume(h: Harness):
 
 
 # --------------------------------------------------------------------------
+
+
+@test
+def test_status_panel_tells_the_learner_what_is_left(h: Harness):
+    """The contents page shows required-page progress and the status the LMS holds.
+
+    Reported problem: learners could not tell how far through the course they
+    were or whether they had done what completion requires. Ticks only meant
+    "opened" and SCORM 1.2 gives the LMS nothing but incomplete/passed/failed.
+    """
+    with h.session() as s:
+        s.open()
+        shown = panel_text(s, MENU_PAGE)
+        assert f"Required pages completed: 0 of {TRACKED_PAGES}" in shown, shown
+        assert "LMS status: Incomplete" in shown, shown
+        assert lms_status_shown(s, MENU_PAGE) == "incomplete"
+        assert "Theme 1 Quiz: not yet submitted" in shown, shown
+        assert "Final comprehensive quiz: not yet submitted" in shown, shown
+        assert "Pass mark: 80%" in shown, shown
+        s.goto(FIRST_CONTENT_PAGE)
+        s.goto(FIRST_CONTENT_PAGE + 1)
+        s.goto(MENU_PAGE)
+        # both pages were left after more than 100ms, so both count
+        shown = panel_text(s, MENU_PAGE)
+        assert f"Required pages completed: 2 of {TRACKED_PAGES}" in shown, shown
+        # the pages still owed are named, decoded from their XML names
+        assert "Still to visit:" in shown, shown
+        assert "Welcome" not in shown.split("Still to visit:")[1], shown
+        assert "Theme 1: Access Control, Authentication & Identity" in shown, shown
+        assert "and " in shown and " more" in shown, f"long list was not truncated: {shown}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_quiz_tick_means_submitted_not_opened(h: Harness):
+    """A quiz that has been opened but not submitted gets a distinct marker.
+
+    The engine ticks a page the moment it loads. For quiz pages that is
+    misleading, so the tick is replaced until the quiz reports its score, and
+    the 'submitted' flag has to survive a resume like the score does.
+    """
+    with h.session() as s:
+        s.open()
+        assert pending_quiz_ticks(s) == [], "nothing has been opened yet"
+        s.goto(THEME1_QUIZ)
+        s.goto(MENU_PAGE)
+        assert pending_quiz_ticks(s) == [THEME1_QUIZ], (
+            f"an opened, unsubmitted quiz should be marked pending: {pending_quiz_ticks(s)}"
+        )
+        assert "Theme 1 Quiz: not yet submitted" in panel_text(s, MENU_PAGE)
+        s.goto(THEME1_QUIZ)
+        s.answer_quiz()
+        s.goto(MENU_PAGE)
+        assert pending_quiz_ticks(s) == [], "a submitted quiz should have a normal tick"
+        assert "Theme 1 Quiz: 100%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+        s.terminate()
+        saved = s.suspends()[-1]
+        rows = {row[0]: row for row in json.loads(saved)["xtPages"]}
+        assert rows[THEME1_QUIZ][5] == 1, f"submitted flag not persisted: {rows[THEME1_QUIZ]}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+    with h.resumed(saved) as s:
+        s.open()
+        s.goto(MENU_PAGE)
+        assert pending_quiz_ticks(s) == [], "the submitted flag was lost on resume"
+        assert "Theme 1 Quiz: 100%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_older_records_infer_submission_from_the_score(h: Harness):
+    """A record written before the submitted flag existed still shows a scored quiz as done."""
+    record = corrupt_record()
+    record_obj = json.loads(record)
+    record_obj["interactions"] = []
+    # five-element row, as written by builds before the submitted flag existed
+    record_obj["xtPages"] = [[THEME1_QUIZ, 75, 1, 4, f"urn:x-xerte:p-{THEME1_QUIZ + 1}"]]
+    record_obj["pagesViewed"] = [0, THEME1_QUIZ]
+    with h.resumed(json.dumps(record_obj)) as s:
+        s.open()
+        s.goto(MENU_PAGE)
+        assert THEME1_QUIZ not in pending_quiz_ticks(s), "a scored quiz was shown as unsubmitted"
+        assert "Theme 1 Quiz: 75%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+
+
+@test
+def test_header_progress_bar_counts_viewed_pages(h: Harness):
+    """The header progress bar is on, labelled honestly, with a marker per quiz."""
+    with h.session() as s:
+        s.open()
+        assert s.sco.locator("#x_headerProgress").count() == 1, "no header progress bar"
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert label.startswith("0%") and "of pages viewed" in label, label
+        assert s.sco.locator("#x_headerProgress .progressMarker").count() == len(QUIZ_PAGES), (
+            "expected one progress marker per quiz page"
+        )
+        s.goto(FIRST_CONTENT_PAGE)
+        s.goto(FIRST_CONTENT_PAGE + 1)
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert not label.startswith("0%"), f"progress bar did not move: {label}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
 def main() -> int:

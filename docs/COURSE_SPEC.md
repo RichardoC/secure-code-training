@@ -37,6 +37,11 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
 - **Scoring**: a **Configure Scores** page sets project scoring; theme quizzes (25%) + final quiz
   (75%) **all count** toward the LMS score. Final quiz pass mark **80%**.
 - **SCORM 1.2** export → `cmi.core.score.raw`, `cmi.core.lesson_status`, `cmi.interactions.n`.
+- **Progress indicators**: header progress bar (`progressBarType="header2"`, milestones on each
+  quiz, label "{x}% of pages viewed"); contents-page ticks mean *opened* for content pages and
+  *submitted* for quizzes; a **Your progress** panel (`xtStatusPanel`, filled by the root
+  script) on the contents page (`menuText`) and on the Course complete page shows required
+  pages done/still to visit, quiz results, weighted score and the status reported to the LMS.
 - **Option order**: every quiz question sets `answerOrder="random"` so the answer options
   shuffle on each attempt (Nottingham per-question "Answer Order" property).
 - **Question types used** (all selection-based, no free text): Multiple Choice (single),
@@ -68,6 +73,9 @@ Real-world incident callout (where Appendix D has one) · Secure-coding mitigati
   agentic/AI (Artificial Intelligence) apps (OWASP Agentic Top 10 2026), interleaved by theme.
 - Structure: 7 themes, a quiz per theme, a final assessment. Time ~3–4 h.
 - How scoring works: theme quizzes count 25%, final quiz counts 75%; final pass mark 80%.
+- Tracking your progress: what the progress bar, the ticks (opened vs. submitted) and the
+  **Your progress** panel mean; every page from Welcome to the final quiz must be visited and
+  every quiz submitted for the course to count as complete.
 
 ### Page 2 — About, licensing, attributions & provenance  [Content]
 - CC BY-SA 4.0 (Creative Commons Attribution-ShareAlike 4.0) notice +
@@ -563,10 +571,12 @@ All framed with full descriptive names (no item codes as the question subject).
   Security Misconfiguration = Classic; Cascading Failures = Agentic.
 
 ### Page 44 — Course complete  [Content]
-- A closing page so it is unambiguous that the training is over: congratulates the learner,
-  reminds them their result is recorded by the LMS (Learning Management System) and that the
-  80% pass mark / last-attempt rule applies, and tells them they may close the window. Plain
-  Text page type.
+- A closing page so it is unambiguous that the training is over: opens with the **Your
+  progress** panel (required pages done, quiz results, weighted score, and the status the LMS
+  currently holds), congratulates the learner, explains that status and score are sent to the
+  LMS as they go (so an "incomplete" means going back to the contents page for the pages it
+  lists), that the 80% pass mark / last-attempt rule applies, and tells them they may close the
+  window. Plain Text page type.
 
 ### [Scores] — Configure Scores
 - Project scoring enabled; theme quizzes (25%) + final quiz (75%) all count; final pass mark
