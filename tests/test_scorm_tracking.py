@@ -131,6 +131,33 @@ SELECT_CORRECT_OPTIONS = """
 }
 """
 
+# Options are shuffled per attempt, so a wrong answer has to be chosen by its
+# correct flag rather than by position.
+SELECT_A_WRONG_OPTION = """
+() => {
+    const inputs = window.jQuery('#optionHolder input');
+    let picked = 0;
+    inputs.each(function () {
+        if (picked) { return; }
+        const correct = window.jQuery(this).data('correct');
+        if (correct !== 'true' && correct !== true) {
+            window.jQuery(this).prop('checked', true).trigger('change');
+            picked++;
+        }
+    });
+    return {options: inputs.length, picked: picked};
+}
+"""
+
+# What the learner is left looking at once a question has been marked.
+FEEDBACK_SHOWN = """
+() => ({
+    help: window.jQuery('#topFeedback').text().trim(),
+    verdict: window.jQuery('#bottomFeedback').text().trim(),
+    marking: window.jQuery('#feedbackGroup').attr('class') || ''
+})
+"""
+
 
 # The SCO always runs inside a frame in an LMS; reproduce that.
 LMS_SHELL = """<!doctype html>
@@ -281,6 +308,21 @@ class Session:
             "the quiz did not reach its results screen, so it reported no score"
         )
         return questions
+
+    def answer_question(self, correctly: bool) -> dict:
+        """Answer the question now on screen and return the feedback shown."""
+        self.sco.wait_for_selector("#optionHolder input", timeout=15000)
+        picked = self.sco.evaluate(
+            SELECT_CORRECT_OPTIONS if correctly else SELECT_A_WRONG_OPTION
+        )
+        assert picked["picked"], f"no option to pick: {picked}"
+        self.sco.evaluate("() => window.jQuery('#checkBtn').trigger('click')")
+        self.page.wait_for_timeout(300)
+        return self.sco.evaluate(FEEDBACK_SHOWN)
+
+    def next_question(self) -> None:
+        self.sco.evaluate("() => window.jQuery('#nextBtn').trigger('click')")
+        self.page.wait_for_timeout(200)
 
     def terminate(self) -> None:
         self.sco.evaluate("() => XTTerminate()")
@@ -949,6 +991,53 @@ def test_status_panel_tells_the_learner_what_is_left(h: Harness):
         assert "Welcome" not in shown.split("Still to visit:")[1], shown
         assert "Theme 1: Access Control, Authentication & Identity" in shown, shown
         assert "and " in shown and " more" in shown, f"long list was not truncated: {shown}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_wrong_answer_gets_a_hint_and_an_explanation(h: Harness):
+    """Getting a question wrong tells the learner why, and what to revisit.
+
+    The help is authored on the question itself, which the quiz model renders
+    on every submitted answer. Only a learner who got it wrong needs it, so
+    the block is cleared again when the answer was right.
+    """
+    with h.session() as s:
+        s.open()
+        s.goto(THEME1_QUIZ)
+        before = s.sco.evaluate(FEEDBACK_SHOWN)
+        assert before["help"] == "", f"help shown before answering: {before}"
+        wrong = s.answer_question(correctly=False)
+        assert "incorrectFeedback" in wrong["marking"], wrong
+        assert wrong["help"].startswith("Hint:"), f"no hint on a wrong answer: {wrong}"
+        assert "Why:" in wrong["help"], f"no explanation on a wrong answer: {wrong}"
+        s.next_question()
+        right = s.answer_question(correctly=True)
+        assert "correctFeedback" in right["marking"], right
+        assert right["help"] == "", f"a correct answer should not be given help: {right}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_every_question_carries_wrong_answer_help(h: Harness):
+    """No question is left without a hint and an explanation.
+
+    The text lives in the course XML, so a question added later would silently
+    have none: walk the parsed project and check all 45 of them.
+    """
+    with h.session() as s:
+        s.open()
+        missing = s.sco.evaluate(
+            "() => { const out = [];"
+            " window.jQuery(x_pages).each(function () {"
+            "   if (this.nodeName !== 'quiz') { return; }"
+            "   window.jQuery(this).children('question').each(function () {"
+            "     const fb = this.getAttribute('feedback') || '';"
+            "     if (fb.indexOf('Hint:') === -1 || fb.indexOf('Why:') === -1) {"
+            "       out.push(this.getAttribute('name')); } }); });"
+            " return out; }"
+        )
+        assert missing == [], f"questions without a hint and explanation: {missing}"
         assert not s.page_errors, f"page errors: {s.page_errors}"
 
 

@@ -29,6 +29,12 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
    releases.
 3. **No free-text questions**: all quiz items are selection-based (single choice, multiple
    response, true/false, matching, categorise).
+4. **Every question teaches on failure**: each question carries a **hint** (what to think about
+   and which theme to revisit) and an **explanation** (why the right answer is right, and where
+   it helps, why the tempting distractor is not), shown **only when the learner answered it
+   wrong**. The hint must not give the answer away; neither may refer to an option by letter or
+   position, because the options shuffle per attempt. Both are held in the question's
+   `feedback` attribute — see `PROJECT_CONTEXT.md` § "Wrong-answer help".
 
 ## Template / technical setup
 
@@ -44,6 +50,9 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
   pages done/still to visit, quiz results, weighted score and the status reported to the LMS.
 - **Option order**: every quiz question sets `answerOrder="random"` so the answer options
   shuffle on each attempt (Nottingham per-question "Answer Order" property).
+- **Wrong-answer help**: every quiz question sets `feedback` (the per-question "General
+  Feedback" property) to a hint plus an explanation; the root script clears it again when the
+  answer was right, so only a learner who got it wrong is shown it.
 - **Question types used** (all selection-based, no free text): Multiple Choice (single),
   Multiple Response (select all), True/False, Matching, Categorise.
 - Editor opened directly at `/edit.php?template_id=<id>`; **Publish** before export.

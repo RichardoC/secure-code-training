@@ -194,7 +194,8 @@ These are binding on this derivative work — see
   time-of-use)`.
 - **Quizzes**: full descriptive names in question stems (never "What causes
   A01" — OWASP renumbers between releases); no free-text questions; no empty
-  answer options; questions nested under their `<quiz>` node.
+  answer options; questions nested under their `<quiz>` node; every question
+  carries a hint and an explanation, shown when a learner answers it wrong.
 - **No auto-playing text**: content pages show all content at once (Plain Text,
   or Bullets with `delaySecs="0"`).
 - **Incident callouts** must be self-contained for learners who haven't read the
@@ -202,6 +203,10 @@ These are binding on this derivative work — see
 
 ## Progress and completion: what learners and the LMS see
 
+- **In a quiz**: a wrong answer is met with a hint (what to think about, and
+  which theme to revisit) and an explanation of the right answer; a correct
+  answer is not. See
+  [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md#wrong-answer-help-hint--explanation-on-every-question).
 - **In the course**: a header progress bar (percentage of pages opened, with a
   marker per quiz), contents-page ticks that mean *opened* for content pages
   and *submitted* for quizzes (an opened-but-unsubmitted quiz shows a

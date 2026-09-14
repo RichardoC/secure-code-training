@@ -278,3 +278,39 @@ other tracking attrs), export a SCORM package, and grep the exported
 `template.xml` for the checklist values in `PROJECT_CONTEXT.md`. Then walk a
 quiz end-to-end (answer → Check → Next → complete → Restart) and confirm
 options reorder between attempts.
+
+## Wrong-answer help: hint + explanation on every question (post-0.0.6)
+
+Every `<question>` gained a `feedback` attribute (the per-question *General
+Feedback* field) holding a hint and an explanation, and part 6 of
+`source/scorm_progress.js` clears that feedback slot again when the answer was
+right, so only a learner who got the question wrong is shown it. See
+`PROJECT_CONTEXT.md` § "Wrong-answer help" for the mechanism and why the
+per-option `feedback` field was not used.
+
+### Local checks (run against `source/data.xml`; XOT re-export still required per convention 9)
+
+- 45 `<question>` elements, 45 with a `feedback` attribute; each unescapes to
+  `<p><strong>Hint:</strong> …</p><p><strong>Why:</strong> …</p>`, the same
+  double-escaped shape as the existing `prompt`/`text` values.
+- No hint or explanation names an option by letter or position (options
+  shuffle per attempt), and no question-level `feedback` gives the answer away
+  in its hint.
+- Option `feedback` attributes are still empty ×161, so the SCORM interaction
+  records (`XTExitInteraction` is passed the *option* feedback) are unchanged.
+- `trackingWeight`, `trackingMode`, `trackingPassed`, `judge="true"` ×8,
+  `answerOrder="random"` ×45, `delaySecs="0"` ×27 unchanged.
+- `python3 tools/sync_root_script.py --check` passes; the compiled root script
+  extracted from `data.xml` passes `node --check`.
+- `tools/render_preview.py` renders 44 pages without error, with the help text
+  under each question for review.
+- `source/data.xml` and `source/preview.xml` are byte-identical.
+
+**Pending (convention 9 — MANDATORY before merge)**: the PR's CI job builds the
+package in a real XOT container and runs `tests/test_scorm_tracking.py`
+(including `test_wrong_answer_gets_a_hint_and_an_explanation` and
+`test_every_question_carries_wrong_answer_help`) — that is the import/export
+gate. Still to do by hand: open the HTML5 editor and confirm a Publish
+round-trip preserves the new `feedback` values, and walk a quiz in `play.php`
+answering one question wrong and one right, confirming the help appears only
+on the wrong one and that the layout holds on a narrow screen.

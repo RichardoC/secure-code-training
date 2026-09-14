@@ -148,6 +148,12 @@ These were agreed with the course owner and must be preserved:
     computed from the shuffled array, so SCORM tracking is unaffected. When
     adding a new question, set `answerOrder="random"` on it. Keep `data.xml`
     and `preview.xml` byte-identical.
+11. **Every question explains itself when it is failed**: each `<question>`
+    carries a `feedback` attribute holding a hint and an explanation, shown
+    only to a learner who answered it wrong (see "Wrong-answer help" below).
+    A new question needs one; the hint must not give the answer away, and
+    neither field may refer to an option by letter or position, because
+    `answerOrder="random"` shuffles them.
 
 ## Known deviations (acknowledged, not to "fix" without asking)
 
@@ -480,6 +486,55 @@ Tests: `test_status_panel_tells_the_learner_what_is_left`,
 `test_header_progress_bar_counts_viewed_pages`, and the panel assertions at the
 end of `test_full_walkthrough_reports_passed`.
 
+## Wrong-answer help (hint + explanation on every question)
+
+A learner who picked the wrong option used to see nothing but *"Your answer is
+incorrect"*, so there was nothing to learn from and nothing to revise before
+the restart. Every one of the 45 questions now carries a **hint** (what to
+think about, and which theme to revisit) and an **explanation** (why the right
+answer is right, and where useful why the tempting distractor is not), shown
+**only when the answer was wrong**.
+
+**Where the text lives.** In the question's own `feedback` attribute — the
+quiz wizard's *General Feedback* field (`quiz.xwd`, so the XOT editor exposes
+it as a normal per-question text area and round-trips it). The value is the
+same double-escaped HTML as `prompt`/`text`:
+
+```xml
+<question ... feedback="&lt;p&gt;&lt;strong&gt;Hint:&lt;/strong&gt; … &lt;/p&gt;&lt;p&gt;&lt;strong&gt;Why:&lt;/strong&gt; … &lt;/p&gt;&#10;">
+```
+
+**Why it needs the root script.** `models_html5/quiz.html` renders that
+attribute on **every** submitted answer, right or wrong: after grading it
+fills three fixed slots (`#topFeedback`, `#middleFeedback`, `#bottomFeedback`)
+in the order the question's `feedbackPos` gives — `G` the question's own
+feedback, `A` the selected option's, `C` the right/wrong line — defaulting to
+`GAC`, so ours lands in `#topFeedback`. Part 6 of `source/scorm_progress.js`
+wraps `quiz.showFeedBackandTrackResults` (re-wrapped from `x_pageLoaded`,
+because the model object is rebuilt for every quiz page) and, when
+`quiz.myProgress[quiz.currentQ] === true`, empties that slot again.
+
+This is deliberately the failure-safe direction: if upstream ever renames the
+hook, the help shows on correct answers as well instead of disappearing. The
+per-option `feedback` field was the other candidate and was not used — it says
+nothing to a learner who gets a *Multiple Answer* question wrong by
+under-selecting (every option they ticked was a correct one), and it would
+duplicate the same paragraph across each wrong option.
+
+**Nothing about tracking changes**: `XTExitInteraction` is handed
+`trackData.feedback`, which is built from the *option* `feedback` values (all
+still empty), so SCORM interaction records are untouched.
+
+Tests: `test_wrong_answer_gets_a_hint_and_an_explanation` (a wrong answer is
+given both, a correct one is not) and
+`test_every_question_carries_wrong_answer_help` (all 45 questions have it, so
+a question added later cannot silently ship without one). Reviewers can read
+the text in the PR preview — `tools/render_preview.py` renders it under each
+question.
+
+**Adding a question**: give it a `feedback` value in the same shape, or
+`test_every_question_carries_wrong_answer_help` fails.
+
 ## Build version stamping (`{{BUILD_VERSION}}` placeholder)
 
 So an operator can tell **which version is running** in an LMS, the SCORM
@@ -628,6 +683,7 @@ unzip -p Secure_code_development_scorm.zip template.xml > /tmp/c.xml
 grep -c "Trial MCQ" /tmp/c.xml                 # 0
 grep -oE '<question' /tmp/c.xml | wc -l           # 45 (23 theme + 18 final + 4 …)
 grep -oE 'answerOrder="random"' /tmp/c.xml | wc -l  # 45 (every question shuffles options per attempt)
+grep -oE 'Hint:' /tmp/c.xml | wc -l            # 45 (wrong-answer help on every question)
 grep -oE 'trackingPassed="[^"]*"' /tmp/c.xml   # 80%
 grep -oE 'judge="true"' /tmp/c.xml | wc -l     # 8
 grep -oE 'trackingWeight="[0-9]+"' /tmp/c.xml   # 7x "1" + 1x "21"
