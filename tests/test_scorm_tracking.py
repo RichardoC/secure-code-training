@@ -379,6 +379,18 @@ PENDING_QUIZ_TICKS = """
 """
 
 
+MILESTONE_MARKERS = """
+() => window.jQuery('#x_headerProgress .progressMarker').map(function () {
+    return {complete: window.jQuery(this).hasClass('complete'), title: this.getAttribute('title')};
+}).get()
+"""
+
+
+def milestone_markers(s: Session) -> list[dict]:
+    """The header progress bar's milestone markers, in order: complete flag and title."""
+    return s.sco.evaluate(MILESTONE_MARKERS)
+
+
 def pending_quiz_ticks(s: Session) -> list[int]:
     """Page indexes whose contents-page tick is the 'quiz not yet submitted' marker."""
     return s.sco.evaluate(PENDING_QUIZ_TICKS)
@@ -984,6 +996,7 @@ def test_quiz_tick_means_submitted_not_opened(h: Harness):
         s.goto(MENU_PAGE)
         assert pending_quiz_ticks(s) == [], "the submitted flag was lost on resume"
         assert "Theme 1 Quiz: 100%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+        assert milestone_markers(s)[0]["complete"] is True, "the quiz milestone was not lit on resume"
         assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
@@ -1018,6 +1031,23 @@ def test_header_progress_bar_counts_viewed_pages(h: Harness):
         s.goto(FIRST_CONTENT_PAGE + 1)
         label = s.sco.inner_text("#x_headerProgress .pbTxt")
         assert not label.startswith("0%"), f"progress bar did not move: {label}"
+        # a quiz milestone lights when the quiz is submitted, not when it is opened
+        s.goto(THEME1_QUIZ)
+        s.goto(MENU_PAGE)
+        markers = milestone_markers(s)
+        assert [m["complete"] for m in markers] == [False] * len(QUIZ_PAGES), (
+            f"opening a quiz lit its milestone: {markers}"
+        )
+        assert "Theme 1 Quiz" in markers[0]["title"], markers[0]
+        assert "not yet submitted" in markers[0]["title"], markers[0]
+        s.goto(THEME1_QUIZ)
+        s.answer_quiz()
+        s.goto(MENU_PAGE)
+        markers = milestone_markers(s)
+        assert [m["complete"] for m in markers] == [True] + [False] * (len(QUIZ_PAGES) - 1), (
+            f"submitting Theme 1 Quiz should light only its milestone: {markers}"
+        )
+        assert markers[0]["title"].endswith("Complete"), markers[0]
         assert not s.page_errors, f"page errors: {s.page_errors}"
 
 

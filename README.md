@@ -203,7 +203,7 @@ These are binding on this derivative work — see
 ## Progress and completion: what learners and the LMS see
 
 - **In the course**: a header progress bar (percentage of pages opened, with a
-  marker per quiz), contents-page ticks that mean *opened* for content pages
+  marker per quiz that lights when that quiz is submitted), contents-page ticks that mean *opened* for content pages
   and *submitted* for quizzes (an opened-but-unsubmitted quiz shows a
   half-filled circle), and a **Your progress** panel on the contents page and
   the Course complete page that lists the required pages still to visit, each
