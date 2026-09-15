@@ -466,7 +466,14 @@ all content-level (no engine patch):
    `progressSub="milestones"`,
    `progressBarPercentage="true"`, `progressBarTxt="{x}% of pages viewed"`,
    `progressBarSubLink="true"`, plus `milestone="true"` on each of the 8 quiz
-   pages. It is viewed-based like the ticks, hence the label wording.
+   pages. The bar itself is viewed-based, hence the label wording. The
+   engine also lights a milestone marker as soon as its page is *viewed*,
+   which made a quiz circle light on opening; `XENITH.PROGRESSBAR.update` is
+   wrapped so that after every engine update `fixMilestones()` lights a quiz
+   milestone only when that quiz is submitted (same flag as the tick), and
+   relabels it "Milestone: <quiz>: Complete" / "(Quiz not yet submitted)".
+   Marker *i* is the *i*-th non-menu, non-standalone page with
+   `milestone="true"`, the same order the engine builds them in.
 
 The Welcome page explains the three indicators; the Course complete page no
 longer claims the result "has been recorded" unconditionally and points at the

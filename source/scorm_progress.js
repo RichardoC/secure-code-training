@@ -69,7 +69,10 @@
  *  5. marks a quiz page as "submitted" (page interaction .complete, a field
  *     the engine never reads) when the quiz reports its score, persists that
  *     flag in xtPages, swaps the menu tick of an opened-but-unsubmitted quiz
- *     for a half-filled circle, and fills every element with the class
+ *     for a half-filled circle, lights a quiz milestone on the header
+ *     progress bar only once that quiz is submitted (the engine lights a
+ *     milestone as soon as its page is viewed), and fills every element
+ *     with the class
  *     xtStatusPanel (one is in the menu text, one on the Course complete
  *     page) with the required-page count, the pages still to do, each quiz
  *     result, the weighted score and the exact status the LMS holds.
@@ -541,6 +544,54 @@
         });
     }
 
+    /* ---- header progress bar: quiz milestones light on submission ---- */
+
+    var MILESTONE_PENDING = ' (Quiz not yet submitted)';
+    var MILESTONE_DONE = ': Complete';
+
+    /* the pages the engine gave a progress marker, in marker order */
+    function milestonePages() {
+        var out = [];
+        if (!pagesKnown()) { return out; }
+        if (typeof x_pages === 'undefined') { return out; }
+        if (!x_pages) { return out; }
+        x_pageInfo.forEach(function (info, idx) {
+            if (info.type === 'menu') { return; }
+            if (info.standalone === true) { return; }
+            if (!x_pages[idx]) { return; }
+            if (typeof x_pages[idx].getAttribute !== 'function') { return; }
+            if (x_pages[idx].getAttribute('milestone') === 'true') { out.push(idx); }
+        });
+        return out;
+    }
+
+    function setMarker(marker, done, label) {
+        var item = jQuery(marker);
+        if (done) { item.addClass('complete'); } else { item.removeClass('complete'); }
+        if (typeof item.button === 'function') {
+            try { item.button({ label: label }); } catch (e) { }
+        }
+        item.attr('title', label);
+    }
+
+    /* Runs after XENITH.PROGRESSBAR.update, which marks a milestone complete
+       as soon as its page has been viewed. A quiz milestone should mean the
+       quiz was submitted, like the menu tick. */
+    function fixMilestones() {
+        if (typeof jQuery !== 'function') { return; }
+        var markers = jQuery('#x_headerProgress .progressMarker');
+        if (markers.length === 0) { return; }
+        milestonePages().forEach(function (idx, i) {
+            if (pageType(idx) !== 'quiz') { return; }
+            var marker = markers.get(i);
+            if (!marker) { return; }
+            var title = jQuery(marker).data('title');
+            if (typeof title !== 'string') { return; }
+            if (quizSubmitted(idx)) { setMarker(marker, true, title + MILESTONE_DONE); }
+            else { setMarker(marker, false, title + MILESTONE_PENDING); }
+        });
+    }
+
     function el(tag, text) {
         var node = document.createElement(tag);
         if (text !== undefined) { node.textContent = text; }
@@ -639,6 +690,7 @@
 
     function refreshUi() {
         try { fixTicks(); } catch (e) { }
+        try { fixMilestones(); } catch (e) { }
         try { fillPanels(); } catch (e) { }
     }
 
@@ -652,6 +704,18 @@
         XENITH.PAGEMENU.tickViewed = function () {
             var result = orig.apply(this, arguments);
             refreshUi();
+            return result;
+        };
+    }
+
+    function wrapProgressBar() {
+        if (typeof XENITH === 'undefined') { return; }
+        if (!XENITH.PROGRESSBAR) { return; }
+        if (typeof XENITH.PROGRESSBAR.update !== 'function') { return; }
+        var orig = XENITH.PROGRESSBAR.update;
+        XENITH.PROGRESSBAR.update = function () {
+            var result = orig.apply(this, arguments);
+            try { fixMilestones(); } catch (e) { }
             return result;
         };
     }
@@ -850,6 +914,7 @@
     wrapState();
     wrapTerminate();
     wrapTickViewed();
+    wrapProgressBar();
     wrapPageLoaded();
     wrapPageScore();
     if (typeof window.addEventListener === 'function') {

@@ -45,8 +45,8 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
 - **Scoring**: a **Configure Scores** page sets project scoring; theme quizzes (25%) + final quiz
   (75%) **all count** toward the LMS score. Final quiz pass mark **80%**.
 - **SCORM 1.2** export → `cmi.core.score.raw`, `cmi.core.lesson_status`, `cmi.interactions.n`.
-- **Progress indicators**: header progress bar (`progressBarType="header2"`, milestones on each
-  quiz, label "{x}% of pages viewed"); contents-page ticks mean *opened* for content pages and
+- **Progress indicators**: header progress bar (`progressBarType="header2"`, a milestone on each
+  quiz that lights only when the quiz is submitted, label "{x}% of pages viewed"); contents-page ticks mean *opened* for content pages and
   *submitted* for quizzes; a **Your progress** panel (`xtStatusPanel`, filled by the root
   script) on the contents page (`menuText`) and on the Course complete page shows required
   pages done/still to visit, quiz results, weighted score and the status reported to the LMS.
