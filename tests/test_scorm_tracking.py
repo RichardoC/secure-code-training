@@ -1178,6 +1178,41 @@ def test_viewed_pages_survive_a_save_and_resume(h: Harness):
 
 
 @test
+def test_viewed_pages_survive_a_resume_late_in_the_course(h: Harness):
+    """The same round trip for a learner who has actually done the work.
+
+    `pagesViewed` is the second thing `fitBudget` sheds when the record will
+    not fit `cmi.suspend_data`, ahead of the quiz scores, so the ticks and the
+    progress bar are the first learner-visible casualty of a record that has
+    grown. A learner saves after a real session, not after three pages.
+    """
+    walked = list(range(FIRST_CONTENT_PAGE, 36))
+    with h.session() as s:
+        s.open()
+        for page_nr in walked:
+            s.goto(page_nr, dwell=120)
+            if page_nr in QUIZ_PAGES:
+                s.answer_quiz()
+        s.terminate()
+        saved = s.suspends()[-1]
+        record = json.loads(saved)
+        assert len(saved) <= SUSPEND_LIMIT, f"record is {len(saved)} characters"
+        assert "pagesViewed" in record, (
+            f"pagesViewed was shed from a {len(saved)} character record: kept {sorted(record)}"
+        )
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+    with h.resumed(saved) as s:
+        s.open()
+        restored = viewed_pages(s)
+        lost = [p for p in walked if p not in restored]
+        assert not lost, f"pages lost their viewed flag on resume: {lost}"
+        s.goto(MENU_PAGE)
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert not label.startswith("0%"), f"progress bar empty after a resume: {label}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
 def test_header_progress_bar_counts_viewed_pages(h: Harness):
     """The header progress bar is on, labelled honestly, with a marker per quiz."""
     with h.session() as s:
