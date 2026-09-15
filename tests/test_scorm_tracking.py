@@ -408,6 +408,27 @@ def lms_status_shown(s: Session, page_nr: int) -> str:
     return s.sco.get_attribute(f"#x_page{page_nr} .xtLmsStatus", "data-status")
 
 
+UNTICKED_PAGES = """
+() => {
+    const out = [];
+    const offset = XENITH.PAGEMENU.menuPage ? 1 : 0;
+    window.jQuery('#x_page0 .menuItem').each(function () {
+        if (window.jQuery(this).find('i.notvisited').length) {
+            out.push(x_normalPages[window.jQuery(this).data('pageIndex') + offset]);
+        }
+    });
+    return out;
+}
+"""
+
+VIEWED_PAGES = """
+() => {
+    const out = [];
+    x_pageInfo.forEach(function (p, i) { if (p.viewed === true) { out.push(i); } });
+    return out;
+}
+"""
+
 PENDING_QUIZ_TICKS = """
 () => {
     const out = [];
@@ -425,6 +446,16 @@ PENDING_QUIZ_TICKS = """
 def pending_quiz_ticks(s: Session) -> list[int]:
     """Page indexes whose contents-page tick is the 'quiz not yet submitted' marker."""
     return s.sco.evaluate(PENDING_QUIZ_TICKS)
+
+
+def unticked_pages(s: Session) -> list[int]:
+    """Page indexes the contents page still shows as never visited."""
+    return s.sco.evaluate(UNTICKED_PAGES)
+
+
+def viewed_pages(s: Session) -> list[int]:
+    """Page indexes the engine currently considers viewed."""
+    return s.sco.evaluate(VIEWED_PAGES)
 
 
 def assert_resumable(record: dict, where: str) -> None:
@@ -1104,6 +1135,46 @@ def test_older_records_infer_submission_from_the_score(h: Harness):
         s.goto(MENU_PAGE)
         assert THEME1_QUIZ not in pending_quiz_ticks(s), "a scored quiz was shown as unsubmitted"
         assert "Theme 1 Quiz: 75%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+
+
+@test
+def test_viewed_pages_survive_a_save_and_resume(h: Harness):
+    """Ticks and the progress bar must still mean something after a resume.
+
+    Both read `x_pageInfo[i].viewed`, which is session state: it survives only
+    through the engine's `pagesViewed` field in the saved record
+    (`x_pagesViewed()` -> `state.pagesViewed` -> `cmi.suspend_data` ->
+    `setVars` -> `x_restorePagesViewed()`). A learner who saves, leaves and
+    comes back to an empty progress bar and no ticks has lost that round trip.
+    The two halves are asserted separately so a failure names which one broke.
+    """
+    seen = [FIRST_CONTENT_PAGE, FIRST_CONTENT_PAGE + 1, FIRST_CONTENT_PAGE + 2]
+    with h.session() as s:
+        s.open()
+        for page_nr in seen:
+            s.goto(page_nr)
+        s.terminate()
+        saved = s.suspends()[-1]
+        record = json.loads(saved)
+        # save side
+        assert "pagesViewed" in record, (
+            f"the saved record has no pagesViewed, so nothing can be restored: {sorted(record)}"
+        )
+        missing = [p for p in seen if p not in record["pagesViewed"]]
+        assert not missing, f"visited pages missing from pagesViewed: {missing}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+    # restore side
+    with h.resumed(saved) as s:
+        s.open()
+        restored = viewed_pages(s)
+        lost = [p for p in seen if p not in restored]
+        assert not lost, f"pages lost their viewed flag on resume: {lost} (restored {restored})"
+        s.goto(MENU_PAGE)
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert not label.startswith("0%"), f"progress bar empty after a resume: {label}"
+        still_unticked = [p for p in seen if p in unticked_pages(s)]
+        assert not still_unticked, f"contents-page ticks lost on resume: {still_unticked}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
 @test
