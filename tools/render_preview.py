@@ -44,8 +44,13 @@ def render_question(q):
     out = [f'<div class="question">',
            f'<div class="q-prompt"><strong>Q:</strong> {html.escape(prompt)}</div>',
            f'<div class="q-meta">{html.escape(qtype)} ({len(opts)} options)</div>',
-           render_options(opts),
-           f'</div>']
+           render_options(opts)]
+    # shown to a learner who gets this question wrong
+    help_html = unesc(q.get("feedback", "")).strip()
+    if help_html:
+        out.append(f'<div class="q-help"><div class="q-meta">shown on a wrong answer</div>'
+                   f'{help_html}</div>')
+    out.append('</div>')
     return "\n".join(out)
 
 def render_page(node, idx):
@@ -117,6 +122,8 @@ main {{ max-width:900px; margin:0 auto; padding:20px; }}
 .opt.correct {{ font-weight:bold; }}
 .opt .lbl {{ color:var(--muted); }}
 .opt .mark {{ color:var(--accent); font-size:.8rem; }}
+.q-help {{ margin-top:8px; padding:6px 12px; border-left:3px solid #c9a227; background:#fffdf3; }}
+.q-help p {{ margin:.3em 0; }}
 footer {{ color:var(--muted); font-size:.8rem; text-align:center; padding:20px; }}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1>

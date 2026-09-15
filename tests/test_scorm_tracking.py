@@ -44,6 +44,7 @@ TRACKED_PAGES = 43              # len(state.toCompletePages)
 NR_PAGES = 45                   # 44 content pages + the table of contents
 THEME1_QUIZ = 9
 QUIZ_PAGES = [9, 15, 21, 24, 30, 35, 38, 43]
+QUESTIONS = 45                  # <question> nodes across the 8 quizzes
 SUSPEND_LIMIT = 4096            # SCORM 1.2 cmi.suspend_data
 
 # A minimal but honest SCORM 1.2 API. Records everything so tests can assert on
@@ -129,6 +130,33 @@ SELECT_CORRECT_OPTIONS = """
     });
     return {options: inputs.length, picked: picked};
 }
+"""
+
+# Options are shuffled per attempt, so a wrong answer has to be chosen by its
+# correct flag rather than by position.
+SELECT_A_WRONG_OPTION = """
+() => {
+    const inputs = window.jQuery('#optionHolder input');
+    let picked = 0;
+    inputs.each(function () {
+        if (picked) { return; }
+        const correct = window.jQuery(this).data('correct');
+        if (correct !== 'true' && correct !== true) {
+            window.jQuery(this).prop('checked', true).trigger('change');
+            picked++;
+        }
+    });
+    return {options: inputs.length, picked: picked};
+}
+"""
+
+# What the learner is left looking at once a question has been marked.
+FEEDBACK_SHOWN = """
+() => ({
+    help: window.jQuery('#topFeedback').text().trim(),
+    verdict: window.jQuery('#bottomFeedback').text().trim(),
+    marking: window.jQuery('#feedbackGroup').attr('class') || ''
+})
 """
 
 
@@ -282,6 +310,21 @@ class Session:
         )
         return questions
 
+    def answer_question(self, correctly: bool) -> dict:
+        """Answer the question now on screen and return the feedback shown."""
+        self.sco.wait_for_selector("#optionHolder input", timeout=15000)
+        picked = self.sco.evaluate(
+            SELECT_CORRECT_OPTIONS if correctly else SELECT_A_WRONG_OPTION
+        )
+        assert picked["picked"], f"no option to pick: {picked}"
+        self.sco.evaluate("() => window.jQuery('#checkBtn').trigger('click')")
+        self.page.wait_for_timeout(300)
+        return self.sco.evaluate(FEEDBACK_SHOWN)
+
+    def next_question(self) -> None:
+        self.sco.evaluate("() => window.jQuery('#nextBtn').trigger('click')")
+        self.page.wait_for_timeout(200)
+
     def terminate(self) -> None:
         self.sco.evaluate("() => XTTerminate()")
         self.page.wait_for_timeout(200)
@@ -365,6 +408,27 @@ def lms_status_shown(s: Session, page_nr: int) -> str:
     return s.sco.get_attribute(f"#x_page{page_nr} .xtLmsStatus", "data-status")
 
 
+UNTICKED_PAGES = """
+() => {
+    const out = [];
+    const offset = XENITH.PAGEMENU.menuPage ? 1 : 0;
+    window.jQuery('#x_page0 .menuItem').each(function () {
+        if (window.jQuery(this).find('i.notvisited').length) {
+            out.push(x_normalPages[window.jQuery(this).data('pageIndex') + offset]);
+        }
+    });
+    return out;
+}
+"""
+
+VIEWED_PAGES = """
+() => {
+    const out = [];
+    x_pageInfo.forEach(function (p, i) { if (p.viewed === true) { out.push(i); } });
+    return out;
+}
+"""
+
 PENDING_QUIZ_TICKS = """
 () => {
     const out = [];
@@ -382,6 +446,16 @@ PENDING_QUIZ_TICKS = """
 def pending_quiz_ticks(s: Session) -> list[int]:
     """Page indexes whose contents-page tick is the 'quiz not yet submitted' marker."""
     return s.sco.evaluate(PENDING_QUIZ_TICKS)
+
+
+def unticked_pages(s: Session) -> list[int]:
+    """Page indexes the contents page still shows as never visited."""
+    return s.sco.evaluate(UNTICKED_PAGES)
+
+
+def viewed_pages(s: Session) -> list[int]:
+    """Page indexes the engine currently considers viewed."""
+    return s.sco.evaluate(VIEWED_PAGES)
 
 
 def assert_resumable(record: dict, where: str) -> None:
@@ -953,6 +1027,66 @@ def test_status_panel_tells_the_learner_what_is_left(h: Harness):
 
 
 @test
+def test_wrong_answer_gets_a_hint_and_an_explanation(h: Harness):
+    """Getting a question wrong tells the learner why, and what to revisit.
+
+    The help is authored on the question itself, which the quiz model renders
+    on every submitted answer. Only a learner who got it wrong needs it, so
+    the block is cleared again when the answer was right.
+    """
+    with h.session() as s:
+        s.open()
+        s.goto(THEME1_QUIZ)
+        before = s.sco.evaluate(FEEDBACK_SHOWN)
+        assert before["help"] == "", f"help shown before answering: {before}"
+        wrong = s.answer_question(correctly=False)
+        assert "incorrectFeedback" in wrong["marking"], wrong
+        assert wrong["help"].startswith("Hint:"), f"no hint on a wrong answer: {wrong}"
+        assert "Why:" in wrong["help"], f"no explanation on a wrong answer: {wrong}"
+        s.next_question()
+        right = s.answer_question(correctly=True)
+        # "correctFeedback" is a substring of "incorrectFeedback", so match exactly
+        assert right["marking"].split() == ["correctFeedback"], right
+        assert right["help"] == "", f"a correct answer should not be given help: {right}"
+        # clearing the help must not take the correct/incorrect line with it
+        assert right["verdict"], f"the verdict was cleared too: {right}"
+        # a second quiz page rebuilds the model object, which has to be re-wrapped
+        s.goto(QUIZ_PAGES[1])
+        again = s.answer_question(correctly=False)
+        assert again["help"].startswith("Hint:"), f"not re-wrapped on a later quiz: {again}"
+        s.next_question()
+        still = s.answer_question(correctly=True)
+        assert still["help"] == "", f"help not cleared on a later quiz: {still}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_every_question_carries_wrong_answer_help(h: Harness):
+    """No question is left without a hint and an explanation.
+
+    The text lives in the course XML, so a question added later would silently
+    have none: walk the parsed project and check all 45 of them.
+    """
+    with h.session() as s:
+        s.open()
+        walk = s.sco.evaluate(
+            "() => { const out = []; let checked = 0;"
+            " window.jQuery(x_pages).each(function () {"
+            "   if (this.nodeName !== 'quiz') { return; }"
+            "   window.jQuery(this).children('question').each(function () {"
+            "     checked++;"
+            "     const fb = this.getAttribute('feedback') || '';"
+            "     if (fb.indexOf('Hint:') === -1 || fb.indexOf('Why:') === -1) {"
+            "       out.push(this.getAttribute('name')); } }); });"
+            " return {checked: checked, missing: out}; }"
+        )
+        # without this the walk finding nothing at all would pass silently
+        assert walk["checked"] == QUESTIONS, f"walked {walk['checked']} questions, expected {QUESTIONS}"
+        assert walk["missing"] == [], f"questions without a hint and explanation: {walk['missing']}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
 def test_quiz_tick_means_submitted_not_opened(h: Harness):
     """A quiz that has been opened but not submitted gets a distinct marker.
 
@@ -1001,6 +1135,81 @@ def test_older_records_infer_submission_from_the_score(h: Harness):
         s.goto(MENU_PAGE)
         assert THEME1_QUIZ not in pending_quiz_ticks(s), "a scored quiz was shown as unsubmitted"
         assert "Theme 1 Quiz: 75%" in panel_text(s, MENU_PAGE), panel_text(s, MENU_PAGE)
+
+
+@test
+def test_viewed_pages_survive_a_save_and_resume(h: Harness):
+    """Ticks and the progress bar must still mean something after a resume.
+
+    Both read `x_pageInfo[i].viewed`, which is session state: it survives only
+    through the engine's `pagesViewed` field in the saved record
+    (`x_pagesViewed()` -> `state.pagesViewed` -> `cmi.suspend_data` ->
+    `setVars` -> `x_restorePagesViewed()`). A learner who saves, leaves and
+    comes back to an empty progress bar and no ticks has lost that round trip.
+    The two halves are asserted separately so a failure names which one broke.
+    """
+    seen = [FIRST_CONTENT_PAGE, FIRST_CONTENT_PAGE + 1, FIRST_CONTENT_PAGE + 2]
+    with h.session() as s:
+        s.open()
+        for page_nr in seen:
+            s.goto(page_nr)
+        s.terminate()
+        saved = s.suspends()[-1]
+        record = json.loads(saved)
+        # save side
+        assert "pagesViewed" in record, (
+            f"the saved record has no pagesViewed, so nothing can be restored: {sorted(record)}"
+        )
+        missing = [p for p in seen if p not in record["pagesViewed"]]
+        assert not missing, f"visited pages missing from pagesViewed: {missing}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+    # restore side
+    with h.resumed(saved) as s:
+        s.open()
+        restored = viewed_pages(s)
+        lost = [p for p in seen if p not in restored]
+        assert not lost, f"pages lost their viewed flag on resume: {lost} (restored {restored})"
+        s.goto(MENU_PAGE)
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert not label.startswith("0%"), f"progress bar empty after a resume: {label}"
+        still_unticked = [p for p in seen if p in unticked_pages(s)]
+        assert not still_unticked, f"contents-page ticks lost on resume: {still_unticked}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+
+
+@test
+def test_viewed_pages_survive_a_resume_late_in_the_course(h: Harness):
+    """The same round trip for a learner who has actually done the work.
+
+    `pagesViewed` is the second thing `fitBudget` sheds when the record will
+    not fit `cmi.suspend_data`, ahead of the quiz scores, so the ticks and the
+    progress bar are the first learner-visible casualty of a record that has
+    grown. A learner saves after a real session, not after three pages.
+    """
+    walked = list(range(FIRST_CONTENT_PAGE, 36))
+    with h.session() as s:
+        s.open()
+        for page_nr in walked:
+            s.goto(page_nr, dwell=120)
+            if page_nr in QUIZ_PAGES:
+                s.answer_quiz()
+        s.terminate()
+        saved = s.suspends()[-1]
+        record = json.loads(saved)
+        assert len(saved) <= SUSPEND_LIMIT, f"record is {len(saved)} characters"
+        assert "pagesViewed" in record, (
+            f"pagesViewed was shed from a {len(saved)} character record: kept {sorted(record)}"
+        )
+        assert not s.page_errors, f"page errors: {s.page_errors}"
+    with h.resumed(saved) as s:
+        s.open()
+        restored = viewed_pages(s)
+        lost = [p for p in walked if p not in restored]
+        assert not lost, f"pages lost their viewed flag on resume: {lost}"
+        s.goto(MENU_PAGE)
+        label = s.sco.inner_text("#x_headerProgress .pbTxt")
+        assert not label.startswith("0%"), f"progress bar empty after a resume: {label}"
+        assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
 @test
