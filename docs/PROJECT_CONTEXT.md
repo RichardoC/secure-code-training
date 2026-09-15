@@ -148,8 +148,8 @@ These were agreed with the course owner and must be preserved:
     computed from the shuffled array, so SCORM tracking is unaffected. When
     adding a new question, set `answerOrder="random"` on it. Keep `data.xml`
     and `preview.xml` byte-identical.
-11. **Every question explains itself when it is failed**: each `<question>`
-    carries a `feedback` attribute holding a hint and an explanation, shown
+11. **Wrong-answer help on every question**: each `<question>` carries a
+    `feedback` attribute holding a hint and an explanation, shown
     only to a learner who answered it wrong (see "Wrong-answer help" below).
     A new question needs one; the hint must not give the answer away, and
     neither field may refer to an option by letter or position, because
@@ -493,54 +493,53 @@ end of `test_full_walkthrough_reports_passed`.
 
 A learner who picked the wrong option used to see nothing but *"Your answer is
 incorrect"*, so there was nothing to learn from and nothing to revise before
-the restart. Every one of the 45 questions now carries a **hint** (what to
-think about, and which theme to revisit) and an **explanation** (why the right
-answer is right, and where useful why the tempting distractor is not), shown
-**only when the answer was wrong**.
+the restart. All 45 questions now carry a hint (what to think about, and which
+theme to revisit) and an explanation (why the right answer is right, and where
+useful why the tempting distractor is not), shown only when the answer was
+wrong.
 
-**Where the text lives.** In the question's own `feedback` attribute — the
-quiz wizard's *General Feedback* field (`quiz.xwd`, so the XOT editor exposes
-it as a normal per-question text area and round-trips it). The value is the
-same double-escaped HTML as `prompt`/`text`:
+The text lives in the question's own `feedback` attribute, the quiz wizard's
+*General Feedback* field (`quiz.xwd`), so the XOT editor exposes it as a normal
+per-question text area and round-trips it. The value carries the same
+double-escaped HTML as `prompt` and `text`:
 
 ```xml
 <question ... feedback="&lt;p&gt;&lt;strong&gt;Hint:&lt;/strong&gt; … &lt;/p&gt;&lt;p&gt;&lt;strong&gt;Why:&lt;/strong&gt; … &lt;/p&gt;&#10;">
 ```
 
-**Why it needs the root script.** `models_html5/quiz.html` renders that
-attribute on **every** submitted answer, right or wrong: after grading it
+It needs the root script because `models_html5/quiz.html` renders that
+attribute on every submitted answer, right or wrong. After grading, the model
 fills three fixed slots (`#topFeedback`, `#middleFeedback`, `#bottomFeedback`)
-in the order the question's `feedbackPos` gives — `G` the question's own
-feedback, `A` the selected option's, `C` the right/wrong line — defaulting to
-`GAC`, so ours lands in `#topFeedback`. Part 6 of `source/scorm_progress.js`
-wraps `quiz.showFeedBackandTrackResults` (re-wrapped from `x_pageLoaded`,
-because the model object is rebuilt for every quiz page) and, when
-`quiz.myProgress[quiz.currentQ] === true`, empties that slot again.
+in the order the question's `feedbackPos` gives, one letter per slot: `G` is
+the question's own feedback, `A` the selected option's, `C` the right/wrong
+line. That defaults to `GAC`, so ours lands in `#topFeedback`. Part 6 of
+`source/scorm_progress.js` wraps `quiz.showFeedBackandTrackResults`, re-wrapped
+from `x_pageLoaded` because the model object is rebuilt for every quiz page,
+and empties that slot again when `quiz.myProgress[quiz.currentQ] === true`.
 
 If upstream ever renames that call the wrapper does nothing and the help shows
 on correct answers as well, which loses nothing. A change to the slot order
-would be worse — the wrapper would clear whatever else landed in that slot —
-so `helpSlot` follows the engine's own `feedbackPos` rule (an *absent*
-attribute means `GAC`; an empty one leaves the engine no slot letters at all,
-so there is no G slot to clear) rather than assuming the first slot. The
-per-option `feedback` field was the other candidate and was not used — it says
-nothing to a learner who gets a *Multiple Answer* question wrong by
-under-selecting (every option they ticked was a correct one), and it would
-duplicate the same paragraph across each wrong option.
+would be worse, because the wrapper would clear whatever else landed in that
+slot. So `helpSlot` follows the engine's own `feedbackPos` rule rather than
+assuming the first slot: an *absent* attribute means `GAC`, while an empty one
+leaves the engine no slot letters at all, so there is no G slot to clear.
 
-**Nothing about tracking changes**: `XTExitInteraction` is handed
-`trackData.feedback`, which is built from the *option* `feedback` values (all
-still empty), so SCORM interaction records are untouched.
+The per-option `feedback` field was the other candidate and was not used. It
+says nothing to a learner who gets a *Multiple Answer* question wrong by
+under-selecting, because every option they ticked was a correct one, and it
+would repeat the same paragraph on each wrong option.
+
+Tracking is unaffected. `XTExitInteraction` is handed `trackData.feedback`,
+which is built from the *option* `feedback` values, and those are all still
+empty, so the SCORM interaction records are untouched.
 
 Tests: `test_wrong_answer_gets_a_hint_and_an_explanation` (a wrong answer is
-given both, a correct one is not) and
-`test_every_question_carries_wrong_answer_help` (all 45 questions have it, so
-a question added later cannot silently ship without one). Reviewers can read
-the text in the PR preview — `tools/render_preview.py` renders it under each
-question.
-
-**Adding a question**: give it a `feedback` value in the same shape, or
-`test_every_question_carries_wrong_answer_help` fails.
+given both, a correct one is not, across two quiz pages) and
+`test_every_question_carries_wrong_answer_help` (all 45 questions have it, so a
+question added later cannot silently ship without one). Reviewers can read the
+text in the PR preview, which `tools/render_preview.py` renders under each
+question. A question added later needs a `feedback` value in the same shape, or
+that second test fails.
 
 ## Build version stamping (`{{BUILD_VERSION}}` placeholder)
 

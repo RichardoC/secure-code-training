@@ -29,10 +29,10 @@ Model, version 1.2)** package with **LMS (Learning Management System)-reported s
    releases.
 3. **No free-text questions**: all quiz items are selection-based (single choice, multiple
    response, true/false, matching, categorise).
-4. **Every question teaches on failure**: each question carries a **hint** (what to think about
-   and which theme to revisit) and an **explanation** (why the right answer is right, and where
-   it helps, why the tempting distractor is not), shown **only when the learner answered it
-   wrong**. The hint must not give the answer away; neither may refer to an option by letter or
+4. **Wrong-answer help on every question**: each question carries a hint (what to think about
+   and which theme to revisit) and an explanation (why the right answer is right, and where
+   it helps, why the tempting distractor is not), shown only when the learner answered it
+   wrong. The hint must not give the answer away; neither may refer to an option by letter or
    position, because the options shuffle per attempt. Both are held in the question's
    `feedback` attribute — see `PROJECT_CONTEXT.md` § "Wrong-answer help". This text is read
    on its own, so convention 1 does not carry across it: expand each acronym on first use

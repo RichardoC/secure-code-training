@@ -203,9 +203,9 @@ These are binding on this derivative work — see
 
 ## Progress and completion: what learners and the LMS see
 
-- **In a quiz**: a wrong answer is met with a hint (what to think about, and
-  which theme to revisit) and an explanation of the right answer; a correct
-  answer is not. See
+- **In a quiz**: answering a question wrong brings up a hint (what to think
+  about, and which theme to revisit) and an explanation of the right answer.
+  Getting it right shows the usual confirmation and nothing more. See
   [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md#wrong-answer-help-hint--explanation-on-every-question).
 - **In the course**: a header progress bar (percentage of pages opened, with a
   marker per quiz), contents-page ticks that mean *opened* for content pages
