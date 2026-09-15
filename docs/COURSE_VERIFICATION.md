@@ -306,6 +306,37 @@ per-option `feedback` field was not used.
   under each question for review.
 - `source/data.xml` and `source/preview.xml` are byte-identical.
 
+### Review pass (three reviewers, post-CI)
+
+The first green build was reviewed for runtime correctness, content/XML
+integrity and fidelity to the OWASP sources. Corrections applied:
+
+- **Mitigations brought up to the 2025 text** (verified against the live
+  `top10.owasp.org/2025` pages): password storage now names an adaptive salted
+  hash with a work factor (Argon2, yescrypt, scrypt, PBKDF2-HMAC-SHA-512) with
+  bcrypt as legacy-only, per A04; mishandling of exceptional conditions now
+  teaches catching at source, a global handler, full rollback ("failing
+  closed") and rate limits, per A10, instead of Security Misconfiguration's
+  stack-trace advice; supply chain drops "reproducible builds" (absent from
+  A03) for official sources, deliberate versions and hardened CI/CD; insecure
+  design drops the retired "usage limits" bullet for the secure development
+  lifecycle and secure design patterns A06 leads with.
+- **Taxonomy**: broken access control is no longer described as human-only
+  (OWASP says *users*, which is the point for agent and non-human identities).
+- **Two adjacent final-quiz hints** stated opposite classification rules
+  (by harm / by root cause); both now point at the stem's own disambiguator.
+- **One hint resolved against its own keyed answer**, one leaked the answer by
+  word stem, one expansion was not title case — all corrected.
+- **Runtime**: `helpSlot` now follows the engine's `feedbackPos` rule exactly
+  (an empty value leaves no G slot, so nothing is cleared — previously it
+  would have deleted the verdict line); the slot is cleared through jQuery so
+  the model's slide-in animation cannot animate an emptied block.
+- **Tests**: the every-question walk now asserts it inspected 45 questions
+  (it would previously have passed if the walk found none);
+  `"correctFeedback" in "incorrectFeedback"` is true as a Python substring, so
+  the marking assertion is now exact; the wrong-answer test covers a second
+  quiz page, which is what the re-wrap on `x_pageLoaded` exists for.
+
 **Pending (convention 9 — MANDATORY before merge)**: the PR's CI job builds the
 package in a real XOT container and runs `tests/test_scorm_tracking.py`
 (including `test_wrong_answer_gets_a_hint_and_an_explanation` and

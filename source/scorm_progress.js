@@ -80,9 +80,12 @@
  *     models_html5/quiz.html renders into a feedback slot on every submitted
  *     answer, right or wrong. This script clears that slot again when the
  *     answer was correct, so the learner who needs the help sees it and the
- *     learner who does not is left with the plain "correct" message. If this
- *     hook ever stops matching the engine, the feedback simply shows on
- *     correct answers too: nothing is lost.
+ *     learner who does not is left with the plain "correct" message. If the
+ *     engine renames that call the wrapper does nothing and the feedback
+ *     simply shows on correct answers too, which loses nothing; a change to
+ *     the slot order would be worse, because the wrapper would clear whatever
+ *     else landed there, so helpSlot follows the engine's own rule for
+ *     feedbackPos rather than assuming the first slot.
  *
  * CONSTRAINT: the compiled one-liner is stored raw in an XML attribute, so it
  * must not contain < > & or " characters (tools/sync_root_script.py enforces
@@ -692,9 +695,11 @@
     function helpSlot(node) {
         var order = 'GAC';
         var attr = node.getAttribute('feedbackPos');
-        if (typeof attr === 'string') {
-            if (attr !== '') { order = attr; }
-        }
+        /* Only an absent attribute means GAC. The engine spreads the value it
+           finds, so an empty one leaves it no slot letters at all and puts the
+           right/wrong line in all three: G is then nowhere, and clearing the
+           first slot would delete the verdict instead. */
+        if (typeof attr === 'string') { order = attr; }
         var pos = order.indexOf('G');
         var id = FEEDBACK_SLOTS[pos];
         if (typeof id !== 'string') { return null; }
@@ -710,13 +715,25 @@
         return quiz.myProgress[quiz.currentQ] === true;
     }
 
+    /* Where the panel is centred vertically the model slides the feedback in,
+       and jQuery measures the height it is animating to while the text is
+       still there. Emptying the element after that would animate a blank gap
+       open and snap it shut, so finish the animation and hide it instead. */
+    function clearSlot(slot) {
+        if (typeof jQuery === 'function') {
+            jQuery(slot).stop(true, true).empty().hide();
+            return;
+        }
+        slot.textContent = '';
+    }
+
     function hideHelpWhenRight() {
         if (!answerWasRight()) { return; }
         var node = questionNode();
         if (!node) { return; }
         var slot = helpSlot(node);
         if (!slot) { return; }
-        slot.textContent = '';
+        clearSlot(slot);
     }
 
     /* The model object is built afresh for every quiz page, so this runs from

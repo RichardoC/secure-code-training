@@ -64,8 +64,8 @@ with agents and building agents.
 - **All 20 OWASP items** present: A01–A10 (classic) + ASI01–ASI10 (agentic),
   each with its own page, interleaved by theme.
 - **Quizzes**: 7 theme quizzes + 1 final quiz, all real `<quiz>` nodes with
-  nested `<question>` children. **45 scored questions total** (23 theme +
-  18 final + 4 … see `COURSE_VERIFICATION.md`). Every question has ≥2 options
+  nested `<question>` children. **45 scored questions total** (27 theme +
+  18 final; see `COURSE_VERIFICATION.md`). Every question has ≥2 options
   and ≥1 `correct="true"`; **no empty option nodes**.
 - **Option order is randomised per attempt**: every `<question>` carries
   `answerOrder="random"` (the Nottingham wizard's per-question "Answer Order"
@@ -153,7 +153,10 @@ These were agreed with the course owner and must be preserved:
     only to a learner who answered it wrong (see "Wrong-answer help" below).
     A new question needs one; the hint must not give the answer away, and
     neither field may refer to an option by letter or position, because
-    `answerOrder="random"` shuffles them.
+    `answerOrder="random"` shuffles them. Wrong-answer help is read on its
+    own, so convention 2 does not carry across it: expand each acronym on
+    first use **within the hint and within the explanation**, even where the
+    same acronym is already expanded elsewhere on that page.
 
 ## Known deviations (acknowledged, not to "fix" without asking)
 
@@ -514,8 +517,12 @@ wraps `quiz.showFeedBackandTrackResults` (re-wrapped from `x_pageLoaded`,
 because the model object is rebuilt for every quiz page) and, when
 `quiz.myProgress[quiz.currentQ] === true`, empties that slot again.
 
-This is deliberately the failure-safe direction: if upstream ever renames the
-hook, the help shows on correct answers as well instead of disappearing. The
+If upstream ever renames that call the wrapper does nothing and the help shows
+on correct answers as well, which loses nothing. A change to the slot order
+would be worse — the wrapper would clear whatever else landed in that slot —
+so `helpSlot` follows the engine's own `feedbackPos` rule (an *absent*
+attribute means `GAC`; an empty one leaves the engine no slot letters at all,
+so there is no G slot to clear) rather than assuming the first slot. The
 per-option `feedback` field was the other candidate and was not used — it says
 nothing to a learner who gets a *Multiple Answer* question wrong by
 under-selecting (every option they ticked was a correct one), and it would
@@ -681,7 +688,7 @@ unzip -p Secure_code_development_scorm.zip template.xml | grep -oE 'trackingPass
 ```bash
 unzip -p Secure_code_development_scorm.zip template.xml > /tmp/c.xml
 grep -c "Trial MCQ" /tmp/c.xml                 # 0
-grep -oE '<question' /tmp/c.xml | wc -l           # 45 (23 theme + 18 final + 4 …)
+grep -oE '<question' /tmp/c.xml | wc -l           # 45 (27 theme + 18 final)
 grep -oE 'answerOrder="random"' /tmp/c.xml | wc -l  # 45 (every question shuffles options per attempt)
 grep -oE 'Hint:' /tmp/c.xml | wc -l            # 45 (wrong-answer help on every question)
 grep -oE 'trackingPassed="[^"]*"' /tmp/c.xml   # 80%

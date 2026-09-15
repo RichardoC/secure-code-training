@@ -44,6 +44,7 @@ TRACKED_PAGES = 43              # len(state.toCompletePages)
 NR_PAGES = 45                   # 44 content pages + the table of contents
 THEME1_QUIZ = 9
 QUIZ_PAGES = [9, 15, 21, 24, 30, 35, 38, 43]
+QUESTIONS = 45                  # <question> nodes across the 8 quizzes
 SUSPEND_LIMIT = 4096            # SCORM 1.2 cmi.suspend_data
 
 # A minimal but honest SCORM 1.2 API. Records everything so tests can assert on
@@ -1013,8 +1014,18 @@ def test_wrong_answer_gets_a_hint_and_an_explanation(h: Harness):
         assert "Why:" in wrong["help"], f"no explanation on a wrong answer: {wrong}"
         s.next_question()
         right = s.answer_question(correctly=True)
-        assert "correctFeedback" in right["marking"], right
+        # "correctFeedback" is a substring of "incorrectFeedback", so match exactly
+        assert right["marking"].split() == ["correctFeedback"], right
         assert right["help"] == "", f"a correct answer should not be given help: {right}"
+        # clearing the help must not take the correct/incorrect line with it
+        assert right["verdict"], f"the verdict was cleared too: {right}"
+        # a second quiz page rebuilds the model object, which has to be re-wrapped
+        s.goto(QUIZ_PAGES[1])
+        again = s.answer_question(correctly=False)
+        assert again["help"].startswith("Hint:"), f"not re-wrapped on a later quiz: {again}"
+        s.next_question()
+        still = s.answer_question(correctly=True)
+        assert still["help"] == "", f"help not cleared on a later quiz: {still}"
         assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
@@ -1027,17 +1038,20 @@ def test_every_question_carries_wrong_answer_help(h: Harness):
     """
     with h.session() as s:
         s.open()
-        missing = s.sco.evaluate(
-            "() => { const out = [];"
+        walk = s.sco.evaluate(
+            "() => { const out = []; let checked = 0;"
             " window.jQuery(x_pages).each(function () {"
             "   if (this.nodeName !== 'quiz') { return; }"
             "   window.jQuery(this).children('question').each(function () {"
+            "     checked++;"
             "     const fb = this.getAttribute('feedback') || '';"
             "     if (fb.indexOf('Hint:') === -1 || fb.indexOf('Why:') === -1) {"
             "       out.push(this.getAttribute('name')); } }); });"
-            " return out; }"
+            " return {checked: checked, missing: out}; }"
         )
-        assert missing == [], f"questions without a hint and explanation: {missing}"
+        # without this the walk finding nothing at all would pass silently
+        assert walk["checked"] == QUESTIONS, f"walked {walk['checked']} questions, expected {QUESTIONS}"
+        assert walk["missing"] == [], f"questions without a hint and explanation: {walk['missing']}"
         assert not s.page_errors, f"page errors: {s.page_errors}"
 
 
