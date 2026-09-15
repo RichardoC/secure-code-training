@@ -77,6 +77,19 @@
  *     page) with the required-page count, the pages still to do, each quiz
  *     result, the weighted score and the exact status the LMS holds.
  *
+ *  6. shows the hint and explanation authored on a question only to a learner
+ *     who got that question wrong. The text lives in the question's own
+ *     feedback attribute (the quiz wizard's "General Feedback" field), which
+ *     models_html5/quiz.html renders into a feedback slot on every submitted
+ *     answer, right or wrong. This script clears that slot again when the
+ *     answer was correct, so the learner who needs the help sees it and the
+ *     learner who does not is left with the plain "correct" message. If the
+ *     engine renames that call the wrapper does nothing and the feedback
+ *     simply shows on correct answers too, which loses nothing; a change to
+ *     the slot order would be worse, because the wrapper would clear whatever
+ *     else landed there, so helpSlot follows the engine's own rule for
+ *     feedbackPos rather than assuming the first slot.
+ *
  * CONSTRAINT: the compiled one-liner is stored raw in an XML attribute, so it
  * must not contain < > & or " characters (tools/sync_root_script.py enforces
  * this). Use === / !== / indexOf() instead of ordering comparisons, nested ifs
@@ -713,7 +726,92 @@
         var orig = window.x_pageLoaded;
         window.x_pageLoaded = function () {
             var result = orig.apply(this, arguments);
+            try { wrapQuizFeedback(); } catch (e) { }
             refreshUi();
+            return result;
+        };
+    }
+
+    /* ---- wrong-answer help: the hint and explanation on a question ---- */
+
+    var FEEDBACK_SLOTS = ['topFeedback', 'middleFeedback', 'bottomFeedback'];
+
+    /* quiz.currentQ indexes quiz.questions, which holds the position of each
+       question within the quiz page, in the order this attempt asks them. */
+    function questionNode() {
+        if (typeof quiz === 'undefined') { return null; }
+        if (!quiz) { return null; }
+        if (!isArray(quiz.questions)) { return null; }
+        var pos = quiz.questions[quiz.currentQ];
+        if (typeof pos !== 'number') { return null; }
+        if (typeof jQuery !== 'function') { return null; }
+        if (typeof x_currentPageXML === 'undefined') { return null; }
+        if (!x_currentPageXML) { return null; }
+        var node = jQuery(x_currentPageXML).children()[pos];
+        if (!node) { return null; }
+        return node;
+    }
+
+    /* The model fills three fixed slots in the order the question's
+       feedbackPos gives, one letter per slot: G is the question's own
+       feedback attribute, A the selected option's, C the right/wrong line.
+       No question here sets feedbackPos, so G lands in the first slot. */
+    function helpSlot(node) {
+        var order = 'GAC';
+        var attr = node.getAttribute('feedbackPos');
+        /* Only an absent attribute means GAC. The engine spreads the value it
+           finds, so an empty one leaves it no slot letters at all and puts the
+           right/wrong line in all three: G is then nowhere, and clearing the
+           first slot would delete the verdict instead. */
+        if (typeof attr === 'string') { order = attr; }
+        var pos = order.indexOf('G');
+        var id = FEEDBACK_SLOTS[pos];
+        if (typeof id !== 'string') { return null; }
+        return document.getElementById(id);
+    }
+
+    /* myProgress holds each question's graded result, and currentQ still
+       names the question just submitted until Next is pressed. */
+    function answerWasRight() {
+        if (typeof quiz === 'undefined') { return false; }
+        if (!quiz) { return false; }
+        if (!isArray(quiz.myProgress)) { return false; }
+        return quiz.myProgress[quiz.currentQ] === true;
+    }
+
+    /* Where the panel is centred vertically the model slides the feedback in,
+       and jQuery measures the height it is animating to while the text is
+       still there. Emptying the element after that would animate a blank gap
+       open and snap it shut, so finish the animation and hide it instead. */
+    function clearSlot(slot) {
+        if (typeof jQuery === 'function') {
+            jQuery(slot).stop(true, true).empty().hide();
+            return;
+        }
+        slot.textContent = '';
+    }
+
+    function hideHelpWhenRight() {
+        if (!answerWasRight()) { return; }
+        var node = questionNode();
+        if (!node) { return; }
+        var slot = helpSlot(node);
+        if (!slot) { return; }
+        clearSlot(slot);
+    }
+
+    /* The model object is built afresh for every quiz page, so this runs from
+       x_pageLoaded rather than once at startup. */
+    function wrapQuizFeedback() {
+        if (typeof quiz === 'undefined') { return; }
+        if (!quiz) { return; }
+        if (quiz.__xtHelp) { return; }
+        if (typeof quiz.showFeedBackandTrackResults !== 'function') { return; }
+        quiz.__xtHelp = true;
+        var orig = quiz.showFeedBackandTrackResults;
+        quiz.showFeedBackandTrackResults = function () {
+            var result = orig.apply(this, arguments);
+            try { hideHelpWhenRight(); } catch (e) { }
             return result;
         };
     }

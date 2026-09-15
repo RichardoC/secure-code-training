@@ -278,3 +278,79 @@ other tracking attrs), export a SCORM package, and grep the exported
 `template.xml` for the checklist values in `PROJECT_CONTEXT.md`. Then walk a
 quiz end-to-end (answer → Check → Next → complete → Restart) and confirm
 options reorder between attempts.
+
+## Wrong-answer help: hint + explanation on every question (post-0.0.6)
+
+Every `<question>` gained a `feedback` attribute (the per-question *General
+Feedback* field) holding a hint and an explanation, and part 6 of
+`source/scorm_progress.js` clears that feedback slot again when the answer was
+right, so only a learner who got the question wrong is shown it. See
+`PROJECT_CONTEXT.md` § "Wrong-answer help" for the mechanism and why the
+per-option `feedback` field was not used.
+
+### Local checks (run against `source/data.xml`; XOT re-export still required per convention 9)
+
+- 45 `<question>` elements, 45 with a `feedback` attribute; each unescapes to
+  `<p><strong>Hint:</strong> …</p><p><strong>Why:</strong> …</p>`, the same
+  double-escaped shape as the existing `prompt`/`text` values.
+- No hint or explanation names an option by letter or position (options
+  shuffle per attempt), and no question-level `feedback` gives the answer away
+  in its hint.
+- Option `feedback` attributes are still empty ×161, so the SCORM interaction
+  records (`XTExitInteraction` is passed the *option* feedback) are unchanged.
+- `trackingWeight`, `trackingMode`, `trackingPassed`, `judge="true"` ×8,
+  `answerOrder="random"` ×45, `delaySecs="0"` ×27 unchanged.
+- `python3 tools/sync_root_script.py --check` passes; the compiled root script
+  extracted from `data.xml` passes `node --check`.
+- `tools/render_preview.py` renders 44 pages without error, with the help text
+  under each question for review.
+- `source/data.xml` and `source/preview.xml` are byte-identical.
+
+### Review pass (three reviewers, post-CI)
+
+The first green build was reviewed for runtime correctness, content and XML
+integrity, and fidelity to the OWASP sources. The mitigations were the weakest
+part and four were out of date against the live `top10.owasp.org/2025` pages:
+
+- Password storage named bcrypt, which A04 now mentions only for legacy
+  systems. It now names an adaptive salted hash with a work factor (Argon2,
+  yescrypt, scrypt, PBKDF2-HMAC-SHA-512).
+- Mishandling of exceptional conditions carried Security Misconfiguration's
+  advice about keeping detail out of errors. It now teaches what A10 leads
+  with: catching at source, a global handler, full rollback (its own term is
+  "failing closed") and rate limits.
+- Supply chain recommended reproducible builds, a phrase absent from A03. It
+  now names official sources, deliberately chosen versions and hardened CI/CD.
+- Insecure design kept "usage limits", a bullet dropped from A06, in place of
+  the secure development lifecycle and secure design patterns it now leads
+  with.
+
+Four content problems were fixed as well: broken access control was described
+as human-only, where OWASP says users, which is the whole point for agent and
+non-human identities; two adjacent final-quiz hints stated opposite
+classification rules, and both now point at the stem's own disambiguator; one
+hint argued against its own keyed answer; and one leaked its answer by word
+stem.
+
+Two latent runtime defects were corrected. `helpSlot` now follows the engine's
+`feedbackPos` rule exactly, because an empty value leaves no G slot and the
+previous code would have deleted the verdict line. The slot is also cleared
+through jQuery, so the model's slide-in animation cannot animate a block that
+has already been emptied.
+
+Two tests could pass while the feature was broken. The every-question walk
+asserted only that its list of failures was empty, so it would have passed if
+the walk had matched nothing; it now asserts it inspected all 45.
+`"correctFeedback"` is a Python substring of `"incorrectFeedback"`, so that
+assertion held whatever the grading outcome; it is now an exact match. The
+wrong-answer test also continues onto a second quiz page, which is the case
+the re-wrap on `x_pageLoaded` exists for.
+
+**Pending (convention 9 — MANDATORY before merge)**: the PR's CI job builds the
+package in a real XOT container and runs `tests/test_scorm_tracking.py`
+(including `test_wrong_answer_gets_a_hint_and_an_explanation` and
+`test_every_question_carries_wrong_answer_help`) — that is the import/export
+gate. Still to do by hand: open the HTML5 editor and confirm a Publish
+round-trip preserves the new `feedback` values, and walk a quiz in `play.php`
+answering one question wrong and one right, confirming the help appears only
+on the wrong one and that the layout holds on a narrow screen.
